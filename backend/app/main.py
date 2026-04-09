@@ -3,9 +3,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from threading import Lock
 from typing import Literal
+from urllib.parse import quote
 from uuid import uuid4
 
 from fastapi import FastAPI
+from fastapi import HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from app.core.totp_words import (
@@ -17,6 +20,14 @@ from app.core.totp_words import (
 
 app = FastAPI(title="Xenon Auth Backend", version="0.1.0")
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 ChallengeStatus = Literal["pending", "approved", "denied", "expired"]
 
 _ACTIVE_CHALLENGE_TTL_SECONDS = 120
@@ -27,6 +38,12 @@ _active_challenges: dict[str, dict[str, object]] = {}
 class WordPreviewRequest(BaseModel):
     secret_key: str = Field(..., description="Base32 secret key")
     unix_time: int | None = Field(default=None, description="Optional UNIX timestamp")
+
+
+class SetupUriRequest(BaseModel):
+    secret_key: str = Field(..., description="Base32 secret key")
+    account_name: str = Field(default="user@xenon", description="Account label shown in authenticator")
+    issuer: str = Field(default="Xenon Auth", description="Issuer label shown in authenticator")
 
 
 class ActiveChallengeCreateRequest(BaseModel):
@@ -88,6 +105,18 @@ def _get_challenge_or_404(challenge_id: str) -> dict[str, object]:
         return record
 
 
+def _build_otpauth_uri(secret_key: str, account_name: str, issuer: str) -> str:
+    safe_account = quote(account_name.strip() or "user@xenon", safe="")
+    safe_issuer = quote(issuer.strip() or "Xenon Auth", safe="")
+    safe_secret = secret_key.strip().replace(" ", "").upper()
+    if not safe_secret:
+        raise HTTPException(status_code=400, detail="secret_key is required")
+    return (
+        f"otpauth://totp/{safe_issuer}:{safe_account}"
+        f"?secret={safe_secret}&issuer={safe_issuer}&algorithm=SHA1&digits=6&period=60"
+    )
+
+
 def _set_challenge_status(challenge_id: str, status: ChallengeStatus) -> dict[str, object]:
     with _challenge_lock:
         record = _active_challenges.get(challenge_id)
@@ -112,16 +141,25 @@ def health() -> dict[str, str]:
 
 @app.post("/preview/words")
 def preview_words(payload: WordPreviewRequest) -> dict[str, object]:
-    digest = generate_totp_hmac(payload.secret_key, for_time=payload.unix_time, time_step=60)
-    raw_code = extract_raw_code_from_digest(digest)
-    indices = integer_to_three_indices(raw_code)
-    words = generate_three_word_code(payload.secret_key, for_time=payload.unix_time, time_step=60)
+    try:
+        digest = generate_totp_hmac(payload.secret_key, for_time=payload.unix_time, time_step=60)
+        raw_code = extract_raw_code_from_digest(digest)
+        indices = integer_to_three_indices(raw_code)
+        words = generate_three_word_code(payload.secret_key, for_time=payload.unix_time, time_step=60)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid secret or request: {exc}") from exc
 
     return {
         "raw_code": raw_code,
         "indices": list(indices),
         "words": list(words),
     }
+
+
+@app.post("/enrollment/setup-uri")
+def create_setup_uri(payload: SetupUriRequest) -> dict[str, str]:
+    uri = _build_otpauth_uri(payload.secret_key, payload.account_name, payload.issuer)
+    return {"otpauth_uri": uri}
 
 
 @app.get("/active/challenges")

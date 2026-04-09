@@ -31,6 +31,7 @@ import KeyRoundedIcon from "@mui/icons-material/KeyRounded";
 import TimerRoundedIcon from "@mui/icons-material/TimerRounded";
 import RefreshRoundedIcon from "@mui/icons-material/RefreshRounded";
 import { BrandLogo } from "./BrandLogo";
+import { QRCodeSVG } from "qrcode.react";
 
 const STEP_SECONDS = 60;
 const DEFAULT_BACKEND_URL = "http://localhost:8000";
@@ -222,6 +223,10 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<PageTab>("status");
   const [backendUrl, setBackendUrl] = useState(DEFAULT_BACKEND_URL);
   const [secretKey, setSecretKey] = useState(DEFAULT_SECRET);
+  const [accountName, setAccountName] = useState("user@xenon");
+  const [issuerName, setIssuerName] = useState("Xenon Auth");
+  const [setupUri, setSetupUri] = useState("");
+  const [setupError, setSetupError] = useState<string | null>(null);
   const [autoHealth, setAutoHealth] = useState(true);
   const [autoPreview, setAutoPreview] = useState(true);
   const [previewWords, setPreviewWords] = useState<string[]>(["PLUTO", "JAZZ", "ECHO"]);
@@ -235,12 +240,37 @@ export default function App() {
 
   const quickSecrets = useMemo(
     () => [
-      { label: "Demo", value: DEFAULT_SECRET },
-      { label: "Ops A", value: "KRUGS4ZANFZSAYJA" },
-      { label: "Ops B", value: "MZXW6YTBOI======" },
+      { label: "Primary", value: DEFAULT_SECRET },
+      { label: "Backup A", value: "KRUGS4ZANFZSAYJA" },
+      { label: "Backup B", value: "MZXW6YTBOI======" },
     ],
     [],
   );
+
+  const generateSetupUri = async () => {
+    try {
+      setSetupError(null);
+      const response = await fetch(`${backendUrl.replace(/\/$/, "")}/enrollment/setup-uri`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          secret_key: secretKey,
+          account_name: accountName,
+          issuer: issuerName,
+        }),
+      });
+      if (!response.ok) throw new Error(`Backend responded ${response.status}`);
+
+      const payload = (await response.json()) as { otpauth_uri?: unknown };
+      if (typeof payload.otpauth_uri !== "string" || payload.otpauth_uri.length < 10) {
+        throw new Error("Invalid enrollment response");
+      }
+
+      setSetupUri(payload.otpauth_uri);
+    } catch (error) {
+      setSetupError(error instanceof Error ? error.message : "Failed to generate setup URI");
+    }
+  };
 
   const syncPreview = async () => {
     setLoadingPreview(true);
@@ -545,6 +575,27 @@ export default function App() {
                 </Box>
               </Box>
 
+              <Box sx={{ display: "grid", gap: 2, gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" } }}>
+                <Box>
+                  <TextField
+                    label="Account name"
+                    value={accountName}
+                    onChange={(event) => setAccountName(event.target.value)}
+                    helperText="Shown in the mobile authenticator entry"
+                    fullWidth
+                  />
+                </Box>
+                <Box>
+                  <TextField
+                    label="Issuer"
+                    value={issuerName}
+                    onChange={(event) => setIssuerName(event.target.value)}
+                    helperText="Service label inside otpauth URI"
+                    fullWidth
+                  />
+                </Box>
+              </Box>
+
               <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
                 {quickSecrets.map((entry) => (
                   <Button key={entry.label} variant="outlined" size="small" onClick={() => setSecretKey(entry.value)}>
@@ -556,6 +607,9 @@ export default function App() {
               <Box sx={{ display: "flex", gap: 1.5, flexWrap: "wrap", alignItems: "center" }}>
                 <Button variant="contained" startIcon={<SyncRoundedIcon />} onClick={() => void syncPreview()} disabled={loadingPreview}>
                   {loadingPreview ? "Syncing..." : "Sync preview"}
+                </Button>
+                <Button variant="outlined" onClick={() => void generateSetupUri()}>
+                  Generate setup QR
                 </Button>
                 <Button variant="outlined" startIcon={<ContentCopyRoundedIcon />} onClick={() => void copyToken()}>
                   {copied ? "Copied" : "Copy token"}
@@ -573,6 +627,41 @@ export default function App() {
                 <Alert severity="error" sx={{ borderRadius: 2 }}>
                   {previewError}
                 </Alert>
+              ) : null}
+              {setupError ? (
+                <Alert severity="error" sx={{ borderRadius: 2 }}>
+                  {setupError}
+                </Alert>
+              ) : null}
+
+              {setupUri ? (
+                <Paper
+                  sx={{
+                    p: 2,
+                    border: "1px solid rgba(255,107,53,0.2)",
+                    background: "linear-gradient(180deg, rgba(255,107,53,0.08), rgba(255,107,53,0.03))",
+                    display: "grid",
+                    gap: 1.5,
+                  }}
+                >
+                  <Typography sx={{ fontWeight: 700 }}>Mobile enrollment QR</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Scan this QR from the production mobile app Settings tab, or paste the URI manually.
+                  </Typography>
+                  <Box sx={{ display: "flex", justifyContent: "center", p: 1 }}>
+                    <Box sx={{ backgroundColor: "#fff", p: 1.2, borderRadius: 1.5 }}>
+                      <QRCodeSVG value={setupUri} size={168} />
+                    </Box>
+                  </Box>
+                  <TextField
+                    label="Setup URI"
+                    value={setupUri}
+                    multiline
+                    minRows={2}
+                    fullWidth
+                    slotProps={{ input: { readOnly: true } }}
+                  />
+                </Paper>
               ) : null}
 
               <Box sx={{ display: "grid", gap: 1.5, gridTemplateColumns: { xs: "1fr", sm: "repeat(3, minmax(0, 1fr))" } }}>
@@ -617,15 +706,15 @@ export default function App() {
                   },
                   {
                     title: "Configure the secret",
-                    desc: "Use the Testing tab to set a Base32 secret and verify the preview words.",
+                    desc: "Set backend URL, account, issuer, and secret in Testing.",
                   },
                   {
-                    title: "Validate the rotation",
-                    desc: "Watch the refresh bar to ensure the token window changes at the expected interval.",
+                    title: "Enroll mobile",
+                    desc: "Generate a setup URI QR and scan it from the mobile app Settings tab, or paste URI manually.",
                   },
                   {
-                    title: "Ship with confidence",
-                    desc: "Use auto preview during integration, then switch to manual sync for debugging.",
+                    title: "Validate passive and active auth",
+                    desc: "Verify rotating passcodes and real-time approve/deny challenge flows before release.",
                   },
                 ].map((step, index) => (
                   <Paper

@@ -60,3 +60,30 @@ def test_approve_and_deny_challenges() -> None:
 
     assert {item["id"] for item in approved} == {first["id"]}
     assert {item["id"] for item in denied} == {second["id"]}
+
+
+def test_setup_uri_endpoint() -> None:
+    response = client.post(
+        "/enrollment/setup-uri",
+        json={
+            "secret_key": "JBSWY3DPEHPK3PXP",
+            "account_name": "alice@example.com",
+            "issuer": "Xenon Auth",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "otpauth://totp/" in payload["otpauth_uri"]
+    assert "secret=JBSWY3DPEHPK3PXP" in payload["otpauth_uri"]
+
+
+def test_preview_words_rejects_invalid_secret() -> None:
+    response = client.post(
+        "/preview/words",
+        json={
+            "secret_key": "invalid!",
+        },
+    )
+
+    assert response.status_code == 400

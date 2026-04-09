@@ -2,12 +2,14 @@ import { StatusBar } from "expo-status-bar";
 import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Modal,
   Pressable,
   ScrollView,
   Text,
   TextInput,
   View,
 } from "react-native";
+import { CameraView, useCameraPermissions } from "expo-camera";
 import { setStringAsync } from "expo-clipboard";
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -228,6 +230,40 @@ function challengeStatusTone(status: ChallengeStatus) {
   return COLORS.primary;
 }
 
+function parseSetupUri(uri: string): { secret: string; account: string; issuer: string } {
+  const trimmed = uri.trim();
+  if (!trimmed.toLowerCase().startsWith("otpauth://totp/")) {
+    throw new Error("Not a valid TOTP setup URI");
+  }
+
+  const withoutScheme = trimmed.replace(/^otpauth:\/\/totp\//i, "");
+  const qIndex = withoutScheme.indexOf("?");
+  const encodedLabel = qIndex >= 0 ? withoutScheme.slice(0, qIndex) : withoutScheme;
+  const query = qIndex >= 0 ? withoutScheme.slice(qIndex + 1) : "";
+
+  const params: Record<string, string> = {};
+  for (const part of query.split("&")) {
+    if (!part) continue;
+    const [rawKey, rawValue = ""] = part.split("=");
+    params[decodeURIComponent(rawKey).toLowerCase()] = decodeURIComponent(rawValue);
+  }
+
+  const secret = (params.secret || "").replace(/\s+/g, "").toUpperCase();
+  if (!secret) {
+    throw new Error("Setup URI does not include a secret");
+  }
+
+  const pathLabel = decodeURIComponent(encodedLabel.replace(/^\//, ""));
+  const pathParts = pathLabel.split(":");
+  const accountFromPath = pathParts.length > 1 ? pathParts.slice(1).join(":") : pathParts[0] || "user@xenon";
+  const issuerFromPath = pathParts.length > 1 ? pathParts[0] : "";
+
+  const issuer = (params.issuer || issuerFromPath || "Xenon Auth").trim();
+  const account = accountFromPath.trim() || "user@xenon";
+
+  return { secret, account, issuer };
+}
+
 function HeaderCard() {
   return (
     <View
@@ -365,6 +401,13 @@ function AppShell() {
   const [tab, setTab] = useState<MobileTab>("home");
   const [backendUrl, setBackendUrl] = useState(DEFAULT_BACKEND_URL);
   const [secretKey, setSecretKey] = useState(DEFAULT_SECRET);
+  const [accountName, setAccountName] = useState("user@xenon");
+  const [issuerName, setIssuerName] = useState("Xenon Auth");
+  const [setupUriInput, setSetupUriInput] = useState("");
+  const [setupError, setSetupError] = useState<string | null>(null);
+  const [showScanner, setShowScanner] = useState(false);
+  const [scanLocked, setScanLocked] = useState(false);
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [autoHealth, setAutoHealth] = useState(true);
   const [autoCodeSync, setAutoCodeSync] = useState(true);
   const [autoChallengeSync, setAutoChallengeSync] = useState(true);
@@ -387,15 +430,6 @@ function AppShell() {
   } = useActiveChallenges(backendUrl, autoChallengeSync);
 
   const backendScore = status === "online" ? 1 : status === "checking" ? 0.5 : 0.12;
-
-  const quickSecrets = useMemo(
-    () => [
-      { label: "Primary", value: DEFAULT_SECRET },
-      { label: "Backup A", value: "KRUGS4ZANFZSAYJA" },
-      { label: "Backup B", value: "MZXW6YTBOI======" },
-    ],
-    [],
-  );
 
   const pendingChallenges = useMemo(
     () => challenges.filter((challenge) => challenge.status === "pending"),
@@ -430,6 +464,37 @@ function AppShell() {
     } finally {
       setLoadingPreview(false);
     }
+  };
+
+  const applySetupUri = (candidate: string) => {
+    try {
+      const parsed = parseSetupUri(candidate);
+      setSecretKey(parsed.secret);
+      setAccountName(parsed.account);
+      setIssuerName(parsed.issuer);
+      setSetupUriInput(candidate.trim());
+      setSetupError(null);
+    } catch (error) {
+      setSetupError(error instanceof Error ? error.message : "Could not parse setup URI");
+    }
+  };
+
+  const openScanner = async () => {
+    const permission = cameraPermission?.granted ? cameraPermission : await requestCameraPermission();
+    if (!permission.granted) {
+      setSetupError("Camera permission is required to scan QR setup codes.");
+      return;
+    }
+    setSetupError(null);
+    setScanLocked(false);
+    setShowScanner(true);
+  };
+
+  const onQrScanned = ({ data }: { data: string }) => {
+    if (scanLocked) return;
+    setScanLocked(true);
+    setShowScanner(false);
+    applySetupUri(data);
   };
 
   const respondToChallenge = async (challengeId: string, action: "approve" | "deny") => {
@@ -648,12 +713,72 @@ function AppShell() {
                 Configure your service endpoint and secret. Keep this private.
               </Text>
 
+              <Text style={{ color: COLORS.text, fontSize: 12, fontWeight: "700" }}>Scan or paste setup URI</Text>
+              <TextInput
+                style={{ borderWidth: 1, borderColor: COLORS.border, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10, color: COLORS.text, backgroundColor: COLORS.cardSoft }}
+                value={setupUriInput}
+                onChangeText={setSetupUriInput}
+                autoCapitalize="none"
+                autoCorrect={false}
+                placeholder="otpauth://totp/..."
+                placeholderTextColor={COLORS.muted}
+              />
+
+              <View style={{ flexDirection: "row", gap: 10 }}>
+                <Pressable
+                  onPress={() => applySetupUri(setupUriInput)}
+                  style={{
+                    flex: 1,
+                    borderRadius: 999,
+                    paddingVertical: 10,
+                    alignItems: "center",
+                    borderWidth: 1,
+                    borderColor: COLORS.border,
+                    backgroundColor: COLORS.cardSoft,
+                  }}
+                >
+                  <Text style={{ color: COLORS.text, fontWeight: "700", fontSize: 12 }}>Apply URI</Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={() => void openScanner()}
+                  style={{
+                    flex: 1,
+                    borderRadius: 999,
+                    paddingVertical: 10,
+                    alignItems: "center",
+                    backgroundColor: COLORS.primary,
+                  }}
+                >
+                  <Text style={{ color: "white", fontWeight: "700", fontSize: 12 }}>Scan QR</Text>
+                </Pressable>
+              </View>
+
+              {setupError ? <Text style={{ color: COLORS.error, fontSize: 12 }}>{setupError}</Text> : null}
+
               <Text style={{ color: COLORS.text, fontSize: 12, fontWeight: "700" }}>Backend URL</Text>
               <TextInput
                 style={{ borderWidth: 1, borderColor: COLORS.border, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10, color: COLORS.text, backgroundColor: COLORS.cardSoft }}
                 value={backendUrl}
                 onChangeText={setBackendUrl}
                 autoCapitalize="none"
+                autoCorrect={false}
+              />
+
+              <Text style={{ color: COLORS.text, fontSize: 12, fontWeight: "700" }}>Account name</Text>
+              <TextInput
+                style={{ borderWidth: 1, borderColor: COLORS.border, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10, color: COLORS.text, backgroundColor: COLORS.cardSoft }}
+                value={accountName}
+                onChangeText={setAccountName}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+
+              <Text style={{ color: COLORS.text, fontSize: 12, fontWeight: "700" }}>Issuer</Text>
+              <TextInput
+                style={{ borderWidth: 1, borderColor: COLORS.border, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10, color: COLORS.text, backgroundColor: COLORS.cardSoft }}
+                value={issuerName}
+                onChangeText={setIssuerName}
                 autoCorrect={false}
               />
 
@@ -665,18 +790,6 @@ function AppShell() {
                 autoCapitalize="characters"
                 autoCorrect={false}
               />
-
-              <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
-                {quickSecrets.map((entry) => (
-                  <Pressable
-                    key={entry.label}
-                    onPress={() => setSecretKey(entry.value)}
-                    style={{ borderWidth: 1, borderColor: COLORS.border, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: COLORS.cardSoft }}
-                  >
-                    <Text style={{ color: COLORS.text, fontSize: 12, fontWeight: "700" }}>{entry.label}</Text>
-                  </Pressable>
-                ))}
-              </View>
 
               <Pressable
                 onPress={() => {
@@ -715,6 +828,35 @@ function AppShell() {
           </View>
         ) : null}
       </ScrollView>
+
+      <Modal visible={showScanner} transparent animationType="slide" onRequestClose={() => setShowScanner(false)}>
+        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.92)", justifyContent: "center", padding: 16, gap: 12 }}>
+          <Text style={{ color: COLORS.text, fontSize: 20, fontWeight: "800", textAlign: "center" }}>Scan setup QR</Text>
+          <Text style={{ color: COLORS.muted, fontSize: 13, textAlign: "center" }}>
+            Point your camera at the Xenon Auth setup QR code.
+          </Text>
+          <View style={{ borderRadius: 18, overflow: "hidden", borderWidth: 1, borderColor: COLORS.border, backgroundColor: "black", height: 360 }}>
+            <CameraView
+              style={{ flex: 1 }}
+              barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+              onBarcodeScanned={onQrScanned}
+            />
+          </View>
+          <Pressable
+            onPress={() => setShowScanner(false)}
+            style={{
+              borderRadius: 999,
+              paddingVertical: 12,
+              alignItems: "center",
+              borderWidth: 1,
+              borderColor: COLORS.border,
+              backgroundColor: COLORS.cardSoft,
+            }}
+          >
+            <Text style={{ color: COLORS.text, fontWeight: "700" }}>Cancel</Text>
+          </Pressable>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
