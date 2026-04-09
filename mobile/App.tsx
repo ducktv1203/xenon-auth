@@ -205,7 +205,7 @@ export default function App() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.bg }}>
       <StatusBar style="light" backgroundColor={COLORS.bg} translucent={false} />
-      <ScrollView contentContainerStyle={{ padding: 16, gap: 14 }}>
+      <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={{ padding: 16, paddingTop: 22, gap: 14 }}>
         <View
           style={{
             backgroundColor: COLORS.card,

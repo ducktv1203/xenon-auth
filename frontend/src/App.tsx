@@ -205,9 +205,22 @@ export default function App() {
         minHeight: "100vh",
         bgcolor: "background.default",
         backgroundImage:
-          "radial-gradient(circle at 12% -10%, rgba(255,95,31,0.24), transparent 38%), radial-gradient(circle at 88% 18%, rgba(255,95,31,0.14), transparent 34%)",
+          "radial-gradient(circle at 12% -10%, rgba(255,95,31,0.24), transparent 38%), radial-gradient(circle at 88% 18%, rgba(255,95,31,0.14), transparent 34%), linear-gradient(180deg, #0d0d0d 0%, #121212 100%)",
       }}
     >
+      <Box
+        aria-hidden="true"
+        sx={{
+          position: "fixed",
+          inset: 0,
+          pointerEvents: "none",
+          opacity: 0.3,
+          backgroundImage:
+            "linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px)",
+          backgroundSize: "56px 56px",
+          maskImage: "radial-gradient(circle at center, black 28%, transparent 78%)",
+        }}
+      />
       <Container maxWidth="lg" sx={{ py: { xs: 3, md: 5 }, display: "grid", gap: 3 }}>
         <Paper
           sx={{
@@ -219,7 +232,7 @@ export default function App() {
         >
           <Box sx={{ display: "grid", gap: 2.5 }}>
             <BrandLogo />
-            <Typography variant="h1" sx={{ fontSize: { xs: 34, md: 52 }, lineHeight: 0.98, maxWidth: 12 }}>
+            <Typography variant="h1" sx={{ fontSize: { xs: 34, md: 52 }, lineHeight: 0.98, maxWidth: "12ch" }}>
               Product-ready 2FA with three-word tokens.
             </Typography>
             <Typography color="text.secondary" sx={{ maxWidth: 760, lineHeight: 1.8 }}>
