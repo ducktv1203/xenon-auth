@@ -541,12 +541,12 @@ export default function App() {
 
                         {challenge.status === "pending" ? (
                           <Stack direction={{ xs: "column", md: "row" }} spacing={1}>
-                            <Stack direction="row" spacing={1} alignItems="center" sx={{ px: 0.5 }}>
+                            <Box sx={{ display: "flex", gap: 1, alignItems: "center", px: 0.5 }}>
                               <CircularProgress size={16} />
                               <Typography variant="body2" color="text.secondary">
                                 Pending...
                               </Typography>
-                            </Stack>
+                            </Box>
                             <Button
                               variant="outlined"
                               color="error"

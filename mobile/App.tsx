@@ -143,7 +143,7 @@ function challengeTone(status: ChallengeStatus) {
   if (status === "approved") return COLORS.success;
   if (status === "denied") return COLORS.error;
   if (status === "expired") return COLORS.muted;
-  return COLORS.primary;
+  return "#FACC15";
 }
 
 function ChallengeCard({
@@ -460,7 +460,27 @@ function AppShell() {
         headers: { "Content-Type": "application/json" },
         body: payload ? JSON.stringify(payload) : undefined,
       });
-      if (!response.ok) throw new Error(`Backend ${response.status}`);
+      if (!response.ok) {
+        let detail = "";
+        try {
+          const body = (await response.json()) as { detail?: unknown };
+          if (typeof body.detail === "string") {
+            detail = body.detail;
+          }
+        } catch {
+          // Ignore malformed error payload.
+        }
+
+        if (response.status === 400 && /invalid verification code/i.test(detail)) {
+          throw new Error("Wrong verification code. Please try again.");
+        }
+
+        if (detail) {
+          throw new Error(detail);
+        }
+
+        throw new Error(`Backend ${response.status}`);
+      }
       setChallengeCodes((current) => {
         const next = { ...current };
         delete next[challengeId];
