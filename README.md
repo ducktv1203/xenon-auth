@@ -14,7 +14,7 @@ Xenon Auth is a Baryonic Authentication system that turns TOTP outputs into a 3-
 2. Install dependencies:
 	npm install
 3. Start Expo:
-	npm run start
+	npm start
 4. Scan the QR in Expo Go on your phone.
 
 ## Backend
@@ -23,7 +23,7 @@ Xenon Auth is a Baryonic Authentication system that turns TOTP outputs into a 3-
 2. Install deps:
 	pip install -r requirements.txt
 3. Run API:
-	uvicorn app.main:app --reload
+	python app.py
 
 ## Web Frontend
 
@@ -31,4 +31,4 @@ Xenon Auth is a Baryonic Authentication system that turns TOTP outputs into a 3-
 2. Install deps:
 	npm install
 3. Run:
-	npm run dev
+	npm start
