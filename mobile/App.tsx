@@ -1,3 +1,6 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { CameraView, useCameraPermissions } from "expo-camera";
+import { setStringAsync } from "expo-clipboard";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -9,15 +12,13 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { CameraView, useCameraPermissions } from "expo-camera";
-import { setStringAsync } from "expo-clipboard";
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 const STEP_SECONDS = 60;
-const DEFAULT_SECRET = "JBSWY3DPEHPK3PXP";
-const DEFAULT_BACKEND_URL = "http://localhost:8000";
+const BACKEND_URL = "http://localhost:8000";
+const STORAGE_KEY = "xenon_auth_accounts_v1";
 
-type MobileTab = "home" | "requests" | "settings";
+type Mode = "passive" | "active";
 type ChallengeStatus = "pending" | "approved" | "denied" | "expired";
 
 type ActiveChallenge = {
@@ -33,15 +34,25 @@ type ActiveChallenge = {
   responded_at?: number | null;
 };
 
+type AccountItem = {
+  id: string;
+  issuer: string;
+  account: string;
+  secret: string;
+  words: string[];
+  lastUpdated: string;
+  error: string | null;
+};
+
 const COLORS = {
   bg: "#0D0D0D",
-  card: "#161616",
-  cardSoft: "#1D1D1D",
+  card: "#171717",
+  cardSoft: "#1E1E1E",
   border: "#2F2F2F",
   text: "#F8FAFC",
   muted: "#A1A1AA",
   primary: "#FF5F1F",
-  primarySoft: "rgba(255,95,31,0.12)",
+  primarySoft: "rgba(255,95,31,0.14)",
   success: "#16A34A",
   error: "#DC2626",
 };
@@ -62,178 +73,10 @@ function useRefreshWindow() {
   };
 }
 
-function useBackendHealth(url: string, enabled: boolean) {
-  const [status, setStatus] = useState<"checking" | "online" | "offline">("checking");
-  const [lastChecked, setLastChecked] = useState("");
-
-  useEffect(() => {
-    let mounted = true;
-
-    const run = async () => {
-      try {
-        const res = await fetch(`${url.replace(/\/$/, "")}/health`);
-        if (!res.ok) throw new Error();
-        if (mounted) {
-          setStatus("online");
-          setLastChecked(new Date().toLocaleTimeString());
-        }
-      } catch {
-        if (mounted) {
-          setStatus("offline");
-          setLastChecked(new Date().toLocaleTimeString());
-        }
-      }
-    };
-
-    setStatus("checking");
-    void run();
-    const id = enabled ? setInterval(run, STEP_SECONDS * 1000) : undefined;
-
-    return () => {
-      mounted = false;
-      if (id) clearInterval(id);
-    };
-  }, [url, enabled]);
-
-  return { status, lastChecked };
-}
-
-function useActiveChallenges(url: string, enabled: boolean) {
-  const [challenges, setChallenges] = useState<ActiveChallenge[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [lastChecked, setLastChecked] = useState("");
-  const [error, setError] = useState<string | null>(null);
-
-  const syncChallenges = async () => {
-    setLoading(true);
-    try {
-      setError(null);
-      const response = await fetch(`${url.replace(/\/$/, "")}/active/challenges?state=all`);
-      if (!response.ok) throw new Error(`Backend responded ${response.status}`);
-
-      const payload = (await response.json()) as { challenges?: unknown };
-      if (!Array.isArray(payload.challenges)) throw new Error("Invalid challenge payload");
-
-      const normalized = payload.challenges.map((entry) => ({
-        ...entry,
-        created_at: Number((entry as { created_at?: number }).created_at ?? 0),
-        expires_at: Number((entry as { expires_at?: number }).expires_at ?? 0),
-      })) as ActiveChallenge[];
-
-      setChallenges(normalized);
-      setLastChecked(new Date().toLocaleTimeString());
-    } catch (syncError) {
-      setError(syncError instanceof Error ? syncError.message : "Active request sync failed");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    void syncChallenges();
-    if (!enabled) {
-      return undefined;
-    }
-
-    const id = setInterval(() => {
-      void syncChallenges();
-    }, 15_000);
-
-    return () => clearInterval(id);
-  }, [url, enabled]);
-
-  return {
-    challenges,
-    loading,
-    error,
-    lastChecked,
-    syncChallenges,
-    setChallenges,
-    setError,
-  };
-}
-
-function SegmentedProgress({
-  label,
-  caption,
-  value,
-  tone = "primary",
-}: {
-  label: string;
-  caption: string;
-  value: number;
-  tone?: "primary" | "success" | "error" | "muted";
-}) {
-  const bounded = Math.max(0, Math.min(1, value));
-  const toneColor =
-    tone === "success" ? COLORS.success : tone === "error" ? COLORS.error : tone === "muted" ? COLORS.muted : COLORS.primary;
-
-  return (
-    <View style={{ gap: 8 }}>
-      <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 8 }}>
-        <Text style={{ color: COLORS.text, fontSize: 13, fontWeight: "700" }}>{label}</Text>
-        <Text style={{ color: COLORS.muted, fontSize: 12 }}>{caption}</Text>
-      </View>
-
-      <View
-        style={{
-          position: "relative",
-          height: 14,
-          borderRadius: 999,
-          borderWidth: 1,
-          borderColor: COLORS.border,
-          backgroundColor: "#1b1b1b",
-          overflow: "hidden",
-        }}
-      >
-        <View
-          style={{
-            width: `${bounded * 100}%`,
-            height: "100%",
-            borderRadius: 999,
-            backgroundColor: toneColor,
-          }}
-        />
-        <View
-          style={{
-            position: "absolute",
-            left: `${bounded * 100}%`,
-            top: "50%",
-            marginLeft: -8,
-            marginTop: -8,
-            width: 16,
-            height: 16,
-            borderRadius: 999,
-            borderWidth: 2,
-            borderColor: "#0D0D0D",
-            backgroundColor: toneColor,
-          }}
-        />
-      </View>
-    </View>
-  );
-}
-
-function formatSecondsRemaining(expiresAt: number) {
-  const remaining = Math.max(0, expiresAt - Math.floor(Date.now() / 1000));
-  if (remaining === 0) return "Expired";
-  if (remaining < 60) return `${remaining}s left`;
-  const minutes = Math.floor(remaining / 60);
-  const seconds = remaining % 60;
-  return `${minutes}m ${seconds.toString().padStart(2, "0")}s left`;
-}
-
-function challengeStatusTone(status: ChallengeStatus) {
-  if (status === "approved") return COLORS.success;
-  if (status === "denied") return COLORS.error;
-  if (status === "expired") return COLORS.muted;
-  return COLORS.primary;
-}
-
 function parseSetupUri(uri: string): { secret: string; account: string; issuer: string } {
   const trimmed = uri.trim();
   if (!trimmed.toLowerCase().startsWith("otpauth://totp/")) {
-    throw new Error("Not a valid TOTP setup URI");
+    throw new Error("Invalid setup URI");
   }
 
   const withoutScheme = trimmed.replace(/^otpauth:\/\/totp\//i, "");
@@ -250,96 +93,74 @@ function parseSetupUri(uri: string): { secret: string; account: string; issuer: 
 
   const secret = (params.secret || "").replace(/\s+/g, "").toUpperCase();
   if (!secret) {
-    throw new Error("Setup URI does not include a secret");
+    throw new Error("Secret missing in setup URI");
   }
 
-  const pathLabel = decodeURIComponent(encodedLabel.replace(/^\//, ""));
-  const pathParts = pathLabel.split(":");
-  const accountFromPath = pathParts.length > 1 ? pathParts.slice(1).join(":") : pathParts[0] || "user@xenon";
-  const issuerFromPath = pathParts.length > 1 ? pathParts[0] : "";
+  const label = decodeURIComponent(encodedLabel.replace(/^\//, ""));
+  const labelParts = label.split(":");
+  const issuerFromLabel = labelParts.length > 1 ? labelParts[0] : "";
+  const accountFromLabel = labelParts.length > 1 ? labelParts.slice(1).join(":") : label;
 
-  const issuer = (params.issuer || issuerFromPath || "Xenon Auth").trim();
-  const account = accountFromPath.trim() || "user@xenon";
-
-  return { secret, account, issuer };
+  return {
+    secret,
+    issuer: (params.issuer || issuerFromLabel || "Xenon Auth").trim(),
+    account: (accountFromLabel || "user@xenon").trim(),
+  };
 }
 
-function HeaderCard() {
-  return (
-    <View
-      style={{
-        backgroundColor: COLORS.card,
-        borderWidth: 1,
-        borderColor: COLORS.border,
-        borderRadius: 20,
-        padding: 16,
-        gap: 12,
-      }}
-    >
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-        <View
-          style={{
-            width: 44,
-            height: 44,
-            borderRadius: 12,
-            backgroundColor: COLORS.primary,
-            justifyContent: "center",
-            alignItems: "center",
-          }}
-        >
-          <Text style={{ color: "white", fontSize: 15, fontWeight: "800", letterSpacing: 1 }}>XA</Text>
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={{ color: COLORS.muted, fontSize: 11, letterSpacing: 1.4 }}>XENON AUTH</Text>
-          <Text style={{ color: COLORS.text, fontSize: 22, fontWeight: "800", lineHeight: 28 }}>
-            Secure authenticator
-          </Text>
-        </View>
-      </View>
-      <Text style={{ color: COLORS.muted, fontSize: 14, lineHeight: 22 }}>
-        Verify sign-ins with rotating codes and real-time approval requests.
-      </Text>
-    </View>
-  );
+function formatSecondsRemaining(expiresAt: number) {
+  const remaining = Math.max(0, expiresAt - Math.floor(Date.now() / 1000));
+  if (remaining === 0) return "Expired";
+  if (remaining < 60) return `${remaining}s left`;
+  const minutes = Math.floor(remaining / 60);
+  const seconds = remaining % 60;
+  return `${minutes}m ${seconds.toString().padStart(2, "0")}s left`;
+}
+
+function challengeTone(status: ChallengeStatus) {
+  if (status === "approved") return COLORS.success;
+  if (status === "denied") return COLORS.error;
+  if (status === "expired") return COLORS.muted;
+  return COLORS.primary;
 }
 
 function ChallengeCard({
   challenge,
+  busy,
   onApprove,
   onDeny,
-  busy,
 }: {
   challenge: ActiveChallenge;
+  busy: boolean;
   onApprove: () => void;
   onDeny: () => void;
-  busy: boolean;
 }) {
-  const tone = challengeStatusTone(challenge.status);
+  const tone = challengeTone(challenge.status);
 
   return (
     <View
       style={{
         borderWidth: 1,
         borderColor: COLORS.border,
-        borderRadius: 16,
+        borderRadius: 14,
         backgroundColor: COLORS.cardSoft,
         padding: 12,
         gap: 10,
       }}
     >
-      <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
-        <View style={{ flex: 1, gap: 4 }}>
-          <Text style={{ color: COLORS.text, fontSize: 16, fontWeight: "800" }}>{challenge.application}</Text>
+      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+        <View style={{ flex: 1, gap: 3 }}>
+          <Text style={{ color: COLORS.text, fontSize: 15, fontWeight: "800" }}>{challenge.application}</Text>
           <Text style={{ color: COLORS.muted, fontSize: 12 }}>{challenge.user}</Text>
         </View>
         <View
           style={{
-            paddingHorizontal: 10,
-            paddingVertical: 5,
             borderRadius: 999,
-            backgroundColor: `${tone}22`,
             borderWidth: 1,
-            borderColor: `${tone}55`,
+            borderColor: `${tone}66`,
+            backgroundColor: `${tone}22`,
+            paddingHorizontal: 10,
+            paddingVertical: 4,
           }}
         >
           <Text style={{ color: tone, fontSize: 11, fontWeight: "800", textTransform: "uppercase" }}>
@@ -348,13 +169,10 @@ function ChallengeCard({
         </View>
       </View>
 
-      <Text style={{ color: COLORS.muted, fontSize: 13, lineHeight: 19 }}>{challenge.message}</Text>
-
-      <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-        <Text style={{ color: COLORS.muted, fontSize: 12 }}>{challenge.location}</Text>
-        <Text style={{ color: COLORS.muted, fontSize: 12 }}>{challenge.device_label}</Text>
-        <Text style={{ color: COLORS.muted, fontSize: 12 }}>{formatSecondsRemaining(challenge.expires_at)}</Text>
-      </View>
+      <Text style={{ color: COLORS.muted, fontSize: 13, lineHeight: 18 }}>{challenge.message}</Text>
+      <Text style={{ color: COLORS.muted, fontSize: 12 }}>
+        {challenge.location} · {challenge.device_label} · {formatSecondsRemaining(challenge.expires_at)}
+      </Text>
 
       {challenge.status === "pending" ? (
         <View style={{ flexDirection: "row", gap: 10 }}>
@@ -363,30 +181,30 @@ function ChallengeCard({
             disabled={busy}
             style={{
               flex: 1,
-              paddingVertical: 12,
-              borderRadius: 999,
               alignItems: "center",
+              borderRadius: 999,
+              paddingVertical: 11,
               borderWidth: 1,
               borderColor: COLORS.error,
               backgroundColor: "rgba(220,38,38,0.12)",
               opacity: busy ? 0.7 : 1,
             }}
           >
-            <Text style={{ color: COLORS.text, fontSize: 13, fontWeight: "800" }}>Deny</Text>
+            <Text style={{ color: COLORS.text, fontWeight: "800", fontSize: 13 }}>Deny</Text>
           </Pressable>
           <Pressable
             onPress={onApprove}
             disabled={busy}
             style={{
               flex: 1,
-              paddingVertical: 12,
-              borderRadius: 999,
               alignItems: "center",
+              borderRadius: 999,
+              paddingVertical: 11,
               backgroundColor: COLORS.primary,
               opacity: busy ? 0.7 : 1,
             }}
           >
-            <Text style={{ color: "white", fontSize: 13, fontWeight: "800" }}>Approve</Text>
+            <Text style={{ color: "white", fontWeight: "800", fontSize: 13 }}>Approve</Text>
           </Pressable>
         </View>
       ) : null}
@@ -395,41 +213,24 @@ function ChallengeCard({
 }
 
 function AppShell() {
-  const { progress, secondsLeft, windowIndex } = useRefreshWindow();
   const insets = useSafeAreaInsets();
+  const { progress, secondsLeft, windowIndex } = useRefreshWindow();
+  const [mode, setMode] = useState<Mode>("passive");
 
-  const [tab, setTab] = useState<MobileTab>("home");
-  const [backendUrl, setBackendUrl] = useState(DEFAULT_BACKEND_URL);
-  const [secretKey, setSecretKey] = useState(DEFAULT_SECRET);
-  const [accountName, setAccountName] = useState("user@xenon");
-  const [issuerName, setIssuerName] = useState("Xenon Auth");
-  const [setupUriInput, setSetupUriInput] = useState("");
-  const [setupError, setSetupError] = useState<string | null>(null);
+  const [accounts, setAccounts] = useState<AccountItem[]>([]);
+  const [loadingCodes, setLoadingCodes] = useState(false);
+  const [pasteUri, setPasteUri] = useState("");
+  const [menuOpen, setMenuOpen] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
   const [scanLocked, setScanLocked] = useState(false);
+  const [setupError, setSetupError] = useState<string | null>(null);
+  const [copiedAccountId, setCopiedAccountId] = useState<string | null>(null);
+
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
-  const [autoHealth, setAutoHealth] = useState(true);
-  const [autoCodeSync, setAutoCodeSync] = useState(true);
-  const [autoChallengeSync, setAutoChallengeSync] = useState(true);
 
-  const [previewWords, setPreviewWords] = useState<string[]>(["PLUTO", "JAZZ", "ECHO"]);
-  const [previewError, setPreviewError] = useState<string | null>(null);
-  const [previewUpdatedAt, setPreviewUpdatedAt] = useState("");
-  const [loadingPreview, setLoadingPreview] = useState(false);
-  const [copied, setCopied] = useState(false);
-
-  const { status, lastChecked } = useBackendHealth(backendUrl, autoHealth);
-  const {
-    challenges,
-    loading: loadingChallenges,
-    error: challengeError,
-    lastChecked: challengeUpdatedAt,
-    syncChallenges,
-    setChallenges,
-    setError: setChallengeError,
-  } = useActiveChallenges(backendUrl, autoChallengeSync);
-
-  const backendScore = status === "online" ? 1 : status === "checking" ? 0.5 : 0.12;
+  const [challenges, setChallenges] = useState<ActiveChallenge[]>([]);
+  const [challengeError, setChallengeError] = useState<string | null>(null);
+  const [loadingChallenges, setLoadingChallenges] = useState(false);
 
   const pendingChallenges = useMemo(
     () => challenges.filter((challenge) => challenge.status === "pending"),
@@ -441,108 +242,228 @@ function AppShell() {
     [challenges],
   );
 
-  const syncPreview = async () => {
-    setLoadingPreview(true);
-    try {
-      setPreviewError(null);
-      const response = await fetch(`${backendUrl.replace(/\/$/, "")}/preview/words`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ secret_key: secretKey }),
-      });
-      if (!response.ok) throw new Error(`Backend responded ${response.status}`);
-
-      const payload = (await response.json()) as { words?: unknown };
-      if (!Array.isArray(payload.words) || payload.words.length !== 3) {
-        throw new Error("Invalid passcode payload");
+  const upsertAccount = (parsed: { secret: string; account: string; issuer: string }) => {
+    const accountId = `${parsed.issuer}:${parsed.account}`.toLowerCase();
+    setAccounts((current) => {
+      const existing = current.find((item) => item.id === accountId);
+      const base: AccountItem = {
+        id: accountId,
+        issuer: parsed.issuer,
+        account: parsed.account,
+        secret: parsed.secret,
+        words: existing?.words ?? ["----", "----", "----"],
+        lastUpdated: existing?.lastUpdated ?? "",
+        error: null,
+      };
+      if (existing) {
+        return current.map((item) => (item.id === accountId ? base : item));
       }
-
-      setPreviewWords(payload.words.map((word) => String(word).toUpperCase()));
-      setPreviewUpdatedAt(new Date().toLocaleTimeString());
-    } catch (error) {
-      setPreviewError(error instanceof Error ? error.message : "Passcode sync failed");
-    } finally {
-      setLoadingPreview(false);
-    }
+      return [base, ...current];
+    });
+    setSetupError(null);
   };
 
   const applySetupUri = (candidate: string) => {
     try {
       const parsed = parseSetupUri(candidate);
-      setSecretKey(parsed.secret);
-      setAccountName(parsed.account);
-      setIssuerName(parsed.issuer);
-      setSetupUriInput(candidate.trim());
+      upsertAccount(parsed);
+      setPasteUri("");
       setSetupError(null);
     } catch (error) {
-      setSetupError(error instanceof Error ? error.message : "Could not parse setup URI");
+      setSetupError(error instanceof Error ? error.message : "Failed to import account");
+    }
+  };
+
+  const syncAccountCodes = async () => {
+    if (accounts.length === 0) return;
+    setLoadingCodes(true);
+    try {
+      const updates = await Promise.all(
+        accounts.map(async (account) => {
+          try {
+            const response = await fetch(`${BACKEND_URL}/preview/words`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ secret_key: account.secret }),
+            });
+            if (!response.ok) throw new Error(`Backend ${response.status}`);
+
+            const payload = (await response.json()) as { words?: unknown };
+            if (!Array.isArray(payload.words) || payload.words.length !== 3) {
+              throw new Error("Invalid response");
+            }
+
+            return {
+              id: account.id,
+              words: payload.words.map((word) => String(word).toUpperCase()),
+              lastUpdated: new Date().toLocaleTimeString(),
+              error: null,
+            };
+          } catch (error) {
+            return {
+              id: account.id,
+              words: account.words,
+              lastUpdated: account.lastUpdated,
+              error: error instanceof Error ? error.message : "Sync failed",
+            };
+          }
+        }),
+      );
+
+      setAccounts((current) =>
+        current.map((account) => {
+          const patch = updates.find((entry) => entry.id === account.id);
+          return patch
+            ? {
+                ...account,
+                words: patch.words,
+                lastUpdated: patch.lastUpdated,
+                error: patch.error,
+              }
+            : account;
+        }),
+      );
+    } finally {
+      setLoadingCodes(false);
+    }
+  };
+
+  const syncChallenges = async () => {
+    setLoadingChallenges(true);
+    try {
+      setChallengeError(null);
+      const response = await fetch(`${BACKEND_URL}/active/challenges?state=all`);
+      if (!response.ok) throw new Error(`Backend ${response.status}`);
+
+      const payload = (await response.json()) as { challenges?: unknown };
+      if (!Array.isArray(payload.challenges)) throw new Error("Invalid challenge payload");
+
+      setChallenges(
+        payload.challenges.map((entry) => ({
+          ...entry,
+          created_at: Number((entry as { created_at?: number }).created_at ?? 0),
+          expires_at: Number((entry as { expires_at?: number }).expires_at ?? 0),
+        })) as ActiveChallenge[],
+      );
+    } catch (error) {
+      setChallengeError(error instanceof Error ? error.message : "Could not sync requests");
+    } finally {
+      setLoadingChallenges(false);
+    }
+  };
+
+  const respondToChallenge = async (challengeId: string, action: "approve" | "deny") => {
+    try {
+      setChallengeError(null);
+      const response = await fetch(`${BACKEND_URL}/active/challenges/${challengeId}/${action}`, {
+        method: "POST",
+      });
+      if (!response.ok) throw new Error(`Backend ${response.status}`);
+      await syncChallenges();
+    } catch (error) {
+      setChallengeError(error instanceof Error ? error.message : "Request update failed");
     }
   };
 
   const openScanner = async () => {
     const permission = cameraPermission?.granted ? cameraPermission : await requestCameraPermission();
     if (!permission.granted) {
-      setSetupError("Camera permission is required to scan QR setup codes.");
+      setSetupError("Camera permission is required to scan setup QR codes.");
       return;
     }
-    setSetupError(null);
-    setScanLocked(false);
+    setMenuOpen(false);
     setShowScanner(true);
-  };
-
-  const onQrScanned = ({ data }: { data: string }) => {
-    if (scanLocked) return;
-    setScanLocked(true);
-    setShowScanner(false);
-    applySetupUri(data);
-  };
-
-  const respondToChallenge = async (challengeId: string, action: "approve" | "deny") => {
-    try {
-      setChallengeError(null);
-      const response = await fetch(`${backendUrl.replace(/\/$/, "")}/active/challenges/${challengeId}/${action}`, {
-        method: "POST",
-      });
-      if (!response.ok) throw new Error(`Backend responded ${response.status}`);
-
-      setChallenges((current) =>
-        current.map((challenge) =>
-          challenge.id === challengeId
-            ? {
-                ...challenge,
-                status: action === "approve" ? "approved" : "denied",
-                responded_at: Math.floor(Date.now() / 1000),
-              }
-            : challenge,
-        ),
-      );
-
-      await syncChallenges();
-    } catch (error) {
-      setChallengeError(error instanceof Error ? error.message : "Could not update request");
-    }
+    setScanLocked(false);
   };
 
   useEffect(() => {
-    if (autoCodeSync) {
-      void syncPreview();
+    const loadAccounts = async () => {
+      const stored = await AsyncStorage.getItem(STORAGE_KEY);
+      if (!stored) return;
+      try {
+        const parsed = JSON.parse(stored) as AccountItem[];
+        if (Array.isArray(parsed)) {
+          setAccounts(
+            parsed.map((account) => ({
+              ...account,
+              words: Array.isArray(account.words) && account.words.length === 3 ? account.words : ["----", "----", "----"],
+              error: null,
+            })),
+          );
+        }
+      } catch {
+        // Ignore malformed local state.
+      }
+    };
+    void loadAccounts();
+  }, []);
+
+  useEffect(() => {
+    void AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(accounts));
+  }, [accounts]);
+
+  useEffect(() => {
+    if (accounts.length > 0) {
+      void syncAccountCodes();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [backendUrl, secretKey, windowIndex, autoCodeSync]);
+  }, [windowIndex]);
+
+  useEffect(() => {
+    void syncChallenges();
+    const id = setInterval(() => {
+      void syncChallenges();
+    }, 15_000);
+    return () => clearInterval(id);
+  }, []);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.bg }} edges={["top", "left", "right"]}>
       <StatusBar style="light" backgroundColor={COLORS.bg} translucent={false} />
+
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
         contentContainerStyle={{
           paddingHorizontal: 16,
-          paddingTop: Math.max(insets.top, 16) + 8,
+          paddingTop: Math.max(insets.top, 14),
           paddingBottom: Math.max(insets.bottom, 16) + 24,
           gap: 14,
         }}
       >
-        <HeaderCard />
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+            <View
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 10,
+                backgroundColor: COLORS.primary,
+                justifyContent: "center",
+                alignItems: "center",
+              }}
+            >
+              <Text style={{ color: "white", fontWeight: "800", letterSpacing: 1 }}>XA</Text>
+            </View>
+            <View>
+              <Text style={{ color: COLORS.text, fontSize: 18, fontWeight: "800" }}>Xenon Auth</Text>
+              <Text style={{ color: COLORS.muted, fontSize: 12 }}>Secure authenticator</Text>
+            </View>
+          </View>
+
+          <Pressable
+            onPress={() => setMenuOpen(true)}
+            style={{
+              borderWidth: 1,
+              borderColor: COLORS.border,
+              borderRadius: 12,
+              backgroundColor: COLORS.cardSoft,
+              paddingHorizontal: 12,
+              paddingVertical: 9,
+            }}
+          >
+            <Text style={{ color: COLORS.text, fontSize: 13, fontWeight: "800" }}>Menu</Text>
+          </Pressable>
+        </View>
 
         <View
           style={{
@@ -555,118 +476,176 @@ function AppShell() {
             gap: 8,
           }}
         >
-          {([
-            ["home", "Home"],
-            ["requests", "Requests"],
-            ["settings", "Settings"],
-          ] as const).map(([value, label]) => (
+          {(["passive", "active"] as const).map((item) => (
             <Pressable
-              key={value}
-              onPress={() => setTab(value)}
+              key={item}
+              onPress={() => setMode(item)}
               style={{
                 flex: 1,
                 paddingVertical: 10,
                 borderRadius: 999,
                 alignItems: "center",
-                backgroundColor: tab === value ? COLORS.primary : COLORS.cardSoft,
+                backgroundColor: mode === item ? COLORS.primary : COLORS.cardSoft,
                 borderWidth: 1,
-                borderColor: tab === value ? COLORS.primary : COLORS.border,
+                borderColor: mode === item ? COLORS.primary : COLORS.border,
               }}
             >
-              <Text style={{ color: tab === value ? "#FFFFFF" : COLORS.text, fontSize: 13, fontWeight: "700" }}>{label}</Text>
+              <Text style={{ color: mode === item ? "#fff" : COLORS.text, fontSize: 13, fontWeight: "800" }}>
+                {item === "passive" ? "Passive" : "Active"}
+              </Text>
             </Pressable>
           ))}
         </View>
 
-        {tab === "home" ? (
-          <View style={{ gap: 14 }}>
-            <View style={{ backgroundColor: COLORS.card, borderWidth: 1, borderColor: COLORS.border, borderRadius: 20, padding: 16, gap: 12 }}>
-              <Text style={{ color: COLORS.text, fontSize: 20, fontWeight: "700" }}>Authenticator code</Text>
-              <Text style={{ color: COLORS.muted, fontSize: 13, lineHeight: 19 }}>
-                Use this rotating three-word code for sign-ins that require a one-time passcode.
-              </Text>
-
-              <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
-                {previewWords.map((word) => (
-                  <View
-                    key={word}
-                    style={{
-                      flexGrow: 1,
-                      minWidth: 80,
-                      borderWidth: 1,
-                      borderColor: COLORS.border,
-                      borderRadius: 14,
-                      paddingVertical: 14,
-                      alignItems: "center",
-                      backgroundColor: COLORS.cardSoft,
-                    }}
-                  >
-                    <Text style={{ color: COLORS.text, fontWeight: "800", letterSpacing: 2 }}>{word}</Text>
-                  </View>
-                ))}
-              </View>
-
-              <SegmentedProgress label="Rotation window" caption={`${secondsLeft}s until refresh`} value={progress} />
-
-              <Pressable
-                onPress={async () => {
-                  try {
-                    await setStringAsync(previewWords.join(" - "));
-                    setCopied(true);
-                    setTimeout(() => setCopied(false), 1500);
-                  } catch {
-                    setCopied(false);
-                  }
-                }}
+        {mode === "passive" ? (
+          <View style={{ gap: 12 }}>
+            {accounts.length === 0 ? (
+              <View
                 style={{
-                  backgroundColor: COLORS.primary,
-                  borderRadius: 999,
-                  paddingVertical: 12,
-                  paddingHorizontal: 16,
-                  alignItems: "center",
+                  borderWidth: 1,
+                  borderColor: COLORS.border,
+                  borderRadius: 16,
+                  backgroundColor: COLORS.card,
+                  padding: 16,
+                  gap: 10,
                 }}
               >
-                <Text style={{ color: "white", fontWeight: "700" }}>{copied ? "Copied" : "Copy code"}</Text>
-              </Pressable>
+                <Text style={{ color: COLORS.text, fontSize: 17, fontWeight: "800" }}>No accounts linked</Text>
+                <Text style={{ color: COLORS.muted, fontSize: 13, lineHeight: 19 }}>
+                  Use Menu to add an account by scanning a QR setup code or pasting an otpauth URI.
+                </Text>
+              </View>
+            ) : (
+              accounts.map((account) => (
+                <View
+                  key={account.id}
+                  style={{
+                    borderWidth: 1,
+                    borderColor: COLORS.border,
+                    borderRadius: 16,
+                    backgroundColor: COLORS.card,
+                    padding: 14,
+                    gap: 10,
+                  }}
+                >
+                  <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: COLORS.text, fontSize: 15, fontWeight: "800" }}>{account.issuer}</Text>
+                      <Text style={{ color: COLORS.muted, fontSize: 12 }}>{account.account}</Text>
+                    </View>
+                    <Pressable
+                      onPress={async () => {
+                        await setStringAsync(account.words.join(" - "));
+                        setCopiedAccountId(account.id);
+                        setTimeout(() => setCopiedAccountId(null), 1200);
+                      }}
+                      style={{
+                        borderWidth: 1,
+                        borderColor: COLORS.border,
+                        borderRadius: 999,
+                        backgroundColor: COLORS.cardSoft,
+                        paddingHorizontal: 10,
+                        paddingVertical: 6,
+                      }}
+                    >
+                      <Text style={{ color: COLORS.text, fontSize: 12, fontWeight: "700" }}>
+                        {copiedAccountId === account.id ? "Copied" : "Copy"}
+                      </Text>
+                    </Pressable>
+                  </View>
 
-              <Text style={{ color: COLORS.muted, fontSize: 12 }}>Updated {previewUpdatedAt || "not yet"}</Text>
-              {previewError ? <Text style={{ color: COLORS.error, fontSize: 12 }}>Error: {previewError}</Text> : null}
-            </View>
+                  <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+                    {account.words.map((word) => (
+                      <View
+                        key={`${account.id}-${word}`}
+                        style={{
+                          flexGrow: 1,
+                          minWidth: 80,
+                          borderWidth: 1,
+                          borderColor: COLORS.border,
+                          borderRadius: 12,
+                          paddingVertical: 12,
+                          alignItems: "center",
+                          backgroundColor: COLORS.cardSoft,
+                        }}
+                      >
+                        <Text style={{ color: COLORS.text, fontWeight: "800", letterSpacing: 1.6 }}>{word}</Text>
+                      </View>
+                    ))}
+                  </View>
 
-            <View style={{ backgroundColor: COLORS.card, borderWidth: 1, borderColor: COLORS.border, borderRadius: 20, padding: 16, gap: 12 }}>
-              <Text style={{ color: COLORS.text, fontSize: 20, fontWeight: "700" }}>Security overview</Text>
-              <SegmentedProgress
-                label="Backend confidence"
-                caption={status === "online" ? "Connected" : status === "checking" ? "Checking" : "Offline"}
-                value={backendScore}
-                tone={status === "online" ? "success" : status === "offline" ? "error" : "muted"}
-              />
-              <Text style={{ color: COLORS.muted, fontSize: 12 }}>Last health check: {lastChecked || "pending"}</Text>
-              <Text style={{ color: COLORS.muted, fontSize: 12 }}>Pending requests: {pendingChallenges.length}</Text>
-            </View>
+                  <View style={{ gap: 7 }}>
+                    <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                      <Text style={{ color: COLORS.text, fontSize: 12, fontWeight: "700" }}>Rotation window</Text>
+                      <Text style={{ color: COLORS.muted, fontSize: 12 }}>{secondsLeft}s to refresh</Text>
+                    </View>
+                    <View style={{ height: 10, borderRadius: 999, borderWidth: 1, borderColor: COLORS.border, backgroundColor: COLORS.cardSoft, overflow: "hidden" }}>
+                      <View style={{ width: `${Math.max(0, Math.min(100, progress * 100))}%`, height: "100%", backgroundColor: COLORS.primary }} />
+                    </View>
+                  </View>
+
+                  <Text style={{ color: account.error ? COLORS.error : COLORS.muted, fontSize: 12 }}>
+                    {account.error || `Updated ${account.lastUpdated || "pending"}`}
+                  </Text>
+                </View>
+              ))
+            )}
+
+            <Pressable
+              onPress={() => void syncAccountCodes()}
+              style={{
+                borderWidth: 1,
+                borderColor: COLORS.primary,
+                borderRadius: 999,
+                backgroundColor: COLORS.primarySoft,
+                paddingVertical: 11,
+                alignItems: "center",
+                opacity: loadingCodes ? 0.7 : 1,
+              }}
+            >
+              <Text style={{ color: COLORS.text, fontSize: 13, fontWeight: "800" }}>
+                {loadingCodes ? "Refreshing codes..." : "Refresh all codes"}
+              </Text>
+            </Pressable>
           </View>
-        ) : null}
-
-        {tab === "requests" ? (
-          <View style={{ gap: 14 }}>
-            <View style={{ backgroundColor: COLORS.card, borderWidth: 1, borderColor: COLORS.border, borderRadius: 20, padding: 16, gap: 12 }}>
-              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-                <Text style={{ color: COLORS.text, fontSize: 20, fontWeight: "700" }}>Pending sign-in requests</Text>
+        ) : (
+          <View style={{ gap: 12 }}>
+            <View
+              style={{
+                borderWidth: 1,
+                borderColor: COLORS.border,
+                borderRadius: 16,
+                backgroundColor: COLORS.card,
+                padding: 14,
+                gap: 10,
+              }}
+            >
+              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                <Text style={{ color: COLORS.text, fontSize: 18, fontWeight: "800" }}>Sign-in requests</Text>
                 <Pressable
                   onPress={() => void syncChallenges()}
-                  style={{ borderWidth: 1, borderColor: COLORS.border, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: COLORS.cardSoft }}
+                  style={{
+                    borderWidth: 1,
+                    borderColor: COLORS.border,
+                    borderRadius: 999,
+                    backgroundColor: COLORS.cardSoft,
+                    paddingHorizontal: 10,
+                    paddingVertical: 6,
+                  }}
                 >
-                  <Text style={{ color: COLORS.text, fontSize: 12, fontWeight: "700" }}>{loadingChallenges ? "Syncing..." : "Refresh"}</Text>
+                  <Text style={{ color: COLORS.text, fontSize: 12, fontWeight: "700" }}>
+                    {loadingChallenges ? "Syncing..." : "Refresh"}
+                  </Text>
                 </Pressable>
               </View>
-              <Text style={{ color: COLORS.muted, fontSize: 12 }}>Last sync: {challengeUpdatedAt || "pending"}</Text>
-              {challengeError ? <Text style={{ color: COLORS.error, fontSize: 12 }}>Error: {challengeError}</Text> : null}
+
+              {challengeError ? <Text style={{ color: COLORS.error, fontSize: 12 }}>{challengeError}</Text> : null}
 
               {pendingChallenges.length === 0 ? (
-                <View style={{ borderWidth: 1, borderColor: COLORS.border, borderRadius: 14, backgroundColor: COLORS.cardSoft, padding: 12 }}>
-                  <Text style={{ color: COLORS.text, fontSize: 14, fontWeight: "700" }}>No pending approvals</Text>
+                <View style={{ borderWidth: 1, borderColor: COLORS.border, borderRadius: 12, padding: 12, backgroundColor: COLORS.cardSoft }}>
+                  <Text style={{ color: COLORS.text, fontSize: 13, fontWeight: "700" }}>No pending approvals</Text>
                   <Text style={{ color: COLORS.muted, fontSize: 12, marginTop: 6 }}>
-                    Incoming sign-in requests will appear here for approve or deny.
+                    Incoming requests will appear here automatically.
                   </Text>
                 </View>
               ) : (
@@ -684,10 +663,19 @@ function AppShell() {
               )}
             </View>
 
-            <View style={{ backgroundColor: COLORS.card, borderWidth: 1, borderColor: COLORS.border, borderRadius: 20, padding: 16, gap: 12 }}>
-              <Text style={{ color: COLORS.text, fontSize: 18, fontWeight: "700" }}>Recent decisions</Text>
+            <View
+              style={{
+                borderWidth: 1,
+                borderColor: COLORS.border,
+                borderRadius: 16,
+                backgroundColor: COLORS.card,
+                padding: 14,
+                gap: 10,
+              }}
+            >
+              <Text style={{ color: COLORS.text, fontSize: 16, fontWeight: "800" }}>Recent activity</Text>
               {recentChallenges.length === 0 ? (
-                <Text style={{ color: COLORS.muted, fontSize: 12 }}>No recent approvals or denials yet.</Text>
+                <Text style={{ color: COLORS.muted, fontSize: 12 }}>No completed approvals yet.</Text>
               ) : (
                 <View style={{ gap: 8 }}>
                   {recentChallenges.map((challenge) => (
@@ -703,160 +691,132 @@ function AppShell() {
               )}
             </View>
           </View>
-        ) : null}
-
-        {tab === "settings" ? (
-          <View style={{ gap: 14 }}>
-            <View style={{ backgroundColor: COLORS.card, borderWidth: 1, borderColor: COLORS.border, borderRadius: 20, padding: 16, gap: 12 }}>
-              <Text style={{ color: COLORS.text, fontSize: 20, fontWeight: "700" }}>App settings</Text>
-              <Text style={{ color: COLORS.muted, fontSize: 13, lineHeight: 19 }}>
-                Configure your service endpoint and secret. Keep this private.
-              </Text>
-
-              <Text style={{ color: COLORS.text, fontSize: 12, fontWeight: "700" }}>Scan or paste setup URI</Text>
-              <TextInput
-                style={{ borderWidth: 1, borderColor: COLORS.border, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10, color: COLORS.text, backgroundColor: COLORS.cardSoft }}
-                value={setupUriInput}
-                onChangeText={setSetupUriInput}
-                autoCapitalize="none"
-                autoCorrect={false}
-                placeholder="otpauth://totp/..."
-                placeholderTextColor={COLORS.muted}
-              />
-
-              <View style={{ flexDirection: "row", gap: 10 }}>
-                <Pressable
-                  onPress={() => applySetupUri(setupUriInput)}
-                  style={{
-                    flex: 1,
-                    borderRadius: 999,
-                    paddingVertical: 10,
-                    alignItems: "center",
-                    borderWidth: 1,
-                    borderColor: COLORS.border,
-                    backgroundColor: COLORS.cardSoft,
-                  }}
-                >
-                  <Text style={{ color: COLORS.text, fontWeight: "700", fontSize: 12 }}>Apply URI</Text>
-                </Pressable>
-
-                <Pressable
-                  onPress={() => void openScanner()}
-                  style={{
-                    flex: 1,
-                    borderRadius: 999,
-                    paddingVertical: 10,
-                    alignItems: "center",
-                    backgroundColor: COLORS.primary,
-                  }}
-                >
-                  <Text style={{ color: "white", fontWeight: "700", fontSize: 12 }}>Scan QR</Text>
-                </Pressable>
-              </View>
-
-              {setupError ? <Text style={{ color: COLORS.error, fontSize: 12 }}>{setupError}</Text> : null}
-
-              <Text style={{ color: COLORS.text, fontSize: 12, fontWeight: "700" }}>Backend URL</Text>
-              <TextInput
-                style={{ borderWidth: 1, borderColor: COLORS.border, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10, color: COLORS.text, backgroundColor: COLORS.cardSoft }}
-                value={backendUrl}
-                onChangeText={setBackendUrl}
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-
-              <Text style={{ color: COLORS.text, fontSize: 12, fontWeight: "700" }}>Account name</Text>
-              <TextInput
-                style={{ borderWidth: 1, borderColor: COLORS.border, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10, color: COLORS.text, backgroundColor: COLORS.cardSoft }}
-                value={accountName}
-                onChangeText={setAccountName}
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-
-              <Text style={{ color: COLORS.text, fontSize: 12, fontWeight: "700" }}>Issuer</Text>
-              <TextInput
-                style={{ borderWidth: 1, borderColor: COLORS.border, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10, color: COLORS.text, backgroundColor: COLORS.cardSoft }}
-                value={issuerName}
-                onChangeText={setIssuerName}
-                autoCorrect={false}
-              />
-
-              <Text style={{ color: COLORS.text, fontSize: 12, fontWeight: "700" }}>Account secret (Base32)</Text>
-              <TextInput
-                style={{ borderWidth: 1, borderColor: COLORS.border, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10, color: COLORS.text, backgroundColor: COLORS.cardSoft }}
-                value={secretKey}
-                onChangeText={setSecretKey}
-                autoCapitalize="characters"
-                autoCorrect={false}
-              />
-
-              <Pressable
-                onPress={() => {
-                  void syncPreview();
-                  void syncChallenges();
-                }}
-                style={{
-                  backgroundColor: COLORS.primary,
-                  borderRadius: 999,
-                  paddingVertical: 12,
-                  alignItems: "center",
-                }}
-              >
-                <Text style={{ color: "white", fontWeight: "700" }}>Sync now</Text>
-              </Pressable>
-            </View>
-
-            <View style={{ backgroundColor: COLORS.card, borderWidth: 1, borderColor: COLORS.border, borderRadius: 20, padding: 16, gap: 12 }}>
-              <Text style={{ color: COLORS.text, fontSize: 18, fontWeight: "700" }}>Automatic sync</Text>
-
-              <Pressable onPress={() => setAutoHealth((value) => !value)} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-                <Text style={{ color: COLORS.muted, fontSize: 13 }}>Backend health polling</Text>
-                <Text style={{ color: autoHealth ? COLORS.primary : COLORS.muted, fontWeight: "700" }}>{autoHealth ? "On" : "Off"}</Text>
-              </Pressable>
-
-              <Pressable onPress={() => setAutoCodeSync((value) => !value)} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-                <Text style={{ color: COLORS.muted, fontSize: 13 }}>Passive code refresh</Text>
-                <Text style={{ color: autoCodeSync ? COLORS.primary : COLORS.muted, fontWeight: "700" }}>{autoCodeSync ? "On" : "Off"}</Text>
-              </Pressable>
-
-              <Pressable onPress={() => setAutoChallengeSync((value) => !value)} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-                <Text style={{ color: COLORS.muted, fontSize: 13 }}>Active request refresh</Text>
-                <Text style={{ color: autoChallengeSync ? COLORS.primary : COLORS.muted, fontWeight: "700" }}>{autoChallengeSync ? "On" : "Off"}</Text>
-              </Pressable>
-            </View>
-          </View>
-        ) : null}
+        )}
       </ScrollView>
+
+      <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
+        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.62)", justifyContent: "flex-start", alignItems: "flex-end", paddingTop: Math.max(insets.top, 14) + 50, paddingHorizontal: 14 }}>
+          <View
+            style={{
+              width: "92%",
+              maxWidth: 360,
+              borderRadius: 16,
+              borderWidth: 1,
+              borderColor: COLORS.border,
+              backgroundColor: COLORS.card,
+              padding: 14,
+              gap: 10,
+            }}
+          >
+            <Text style={{ color: COLORS.text, fontSize: 17, fontWeight: "800" }}>Accounts</Text>
+
+            <Pressable
+              onPress={() => void openScanner()}
+              style={{ borderRadius: 999, backgroundColor: COLORS.primary, paddingVertical: 10, alignItems: "center" }}
+            >
+              <Text style={{ color: "white", fontWeight: "800", fontSize: 13 }}>Scan QR setup code</Text>
+            </Pressable>
+
+            <TextInput
+              style={{ borderWidth: 1, borderColor: COLORS.border, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9, color: COLORS.text, backgroundColor: COLORS.cardSoft }}
+              placeholder="Paste otpauth URI"
+              placeholderTextColor={COLORS.muted}
+              autoCapitalize="none"
+              autoCorrect={false}
+              value={pasteUri}
+              onChangeText={setPasteUri}
+            />
+
+            <Pressable
+              onPress={() => applySetupUri(pasteUri)}
+              style={{ borderRadius: 999, borderWidth: 1, borderColor: COLORS.border, backgroundColor: COLORS.cardSoft, paddingVertical: 10, alignItems: "center" }}
+            >
+              <Text style={{ color: COLORS.text, fontWeight: "800", fontSize: 13 }}>Import from URI</Text>
+            </Pressable>
+
+            {setupError ? <Text style={{ color: COLORS.error, fontSize: 12 }}>{setupError}</Text> : null}
+
+            <View style={{ maxHeight: 220, gap: 8 }}>
+              {accounts.length === 0 ? (
+                <Text style={{ color: COLORS.muted, fontSize: 12 }}>No linked accounts yet.</Text>
+              ) : (
+                accounts.map((account) => (
+                  <View
+                    key={`menu-${account.id}`}
+                    style={{
+                      borderWidth: 1,
+                      borderColor: COLORS.border,
+                      borderRadius: 12,
+                      padding: 10,
+                      backgroundColor: COLORS.cardSoft,
+                      flexDirection: "row",
+                      justifyContent: "space-between",
+                      gap: 8,
+                      alignItems: "center",
+                    }}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: COLORS.text, fontSize: 13, fontWeight: "700" }}>{account.issuer}</Text>
+                      <Text style={{ color: COLORS.muted, fontSize: 11 }}>{account.account}</Text>
+                    </View>
+                    <Pressable
+                      onPress={() => setAccounts((current) => current.filter((item) => item.id !== account.id))}
+                      style={{ borderRadius: 999, borderWidth: 1, borderColor: COLORS.error, backgroundColor: "rgba(220,38,38,0.12)", paddingHorizontal: 10, paddingVertical: 6 }}
+                    >
+                      <Text style={{ color: COLORS.text, fontSize: 11, fontWeight: "800" }}>Remove</Text>
+                    </Pressable>
+                  </View>
+                ))
+              )}
+            </View>
+
+            <Pressable
+              onPress={() => setMenuOpen(false)}
+              style={{ borderRadius: 999, borderWidth: 1, borderColor: COLORS.border, backgroundColor: COLORS.cardSoft, paddingVertical: 10, alignItems: "center" }}
+            >
+              <Text style={{ color: COLORS.text, fontWeight: "800", fontSize: 13 }}>Close</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
 
       <Modal visible={showScanner} transparent animationType="slide" onRequestClose={() => setShowScanner(false)}>
         <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.92)", justifyContent: "center", padding: 16, gap: 12 }}>
           <Text style={{ color: COLORS.text, fontSize: 20, fontWeight: "800", textAlign: "center" }}>Scan setup QR</Text>
           <Text style={{ color: COLORS.muted, fontSize: 13, textAlign: "center" }}>
-            Point your camera at the Xenon Auth setup QR code.
+            Point the camera at the enrollment QR from your service.
           </Text>
+
           <View style={{ borderRadius: 18, overflow: "hidden", borderWidth: 1, borderColor: COLORS.border, backgroundColor: "black", height: 360 }}>
             <CameraView
               style={{ flex: 1 }}
               barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
-              onBarcodeScanned={onQrScanned}
+              onBarcodeScanned={({ data }) => {
+                if (scanLocked) return;
+                setScanLocked(true);
+                setShowScanner(false);
+                applySetupUri(data);
+              }}
             />
           </View>
+
           <Pressable
             onPress={() => setShowScanner(false)}
-            style={{
-              borderRadius: 999,
-              paddingVertical: 12,
-              alignItems: "center",
-              borderWidth: 1,
-              borderColor: COLORS.border,
-              backgroundColor: COLORS.cardSoft,
-            }}
+            style={{ borderRadius: 999, borderWidth: 1, borderColor: COLORS.border, backgroundColor: COLORS.cardSoft, paddingVertical: 11, alignItems: "center" }}
           >
-            <Text style={{ color: COLORS.text, fontWeight: "700" }}>Cancel</Text>
+            <Text style={{ color: COLORS.text, fontWeight: "800", fontSize: 13 }}>Cancel</Text>
           </Pressable>
         </View>
       </Modal>
+
+      {(loadingCodes || loadingChallenges) ? (
+        <View style={{ position: "absolute", bottom: Math.max(insets.bottom, 14), right: 14 }}>
+          <View style={{ borderRadius: 999, backgroundColor: COLORS.cardSoft, borderWidth: 1, borderColor: COLORS.border, paddingHorizontal: 12, paddingVertical: 8, flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <ActivityIndicator color={COLORS.primary} size="small" />
+            <Text style={{ color: COLORS.text, fontSize: 12, fontWeight: "700" }}>Syncing</Text>
+          </View>
+        </View>
+      ) : null}
     </SafeAreaView>
   );
 }
