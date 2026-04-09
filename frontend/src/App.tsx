@@ -7,6 +7,7 @@ import {
   Card,
   CardContent,
   Chip,
+  CircularProgress,
   Container,
   Divider,
   Paper,
@@ -19,8 +20,6 @@ import {
 } from "@mui/material";
 import RefreshRoundedIcon from "@mui/icons-material/RefreshRounded";
 import QrCodeRoundedIcon from "@mui/icons-material/QrCodeRounded";
-import LockOpenRoundedIcon from "@mui/icons-material/LockOpenRounded";
-import LockRoundedIcon from "@mui/icons-material/LockRounded";
 import BlockRoundedIcon from "@mui/icons-material/BlockRounded";
 import AddRoundedIcon from "@mui/icons-material/AddRounded";
 import { QRCodeSVG } from "qrcode.react";
@@ -69,13 +68,11 @@ export default function App() {
     location: "New York, US",
     device_label: "Chrome on Windows",
     message: "Approve sign-in for Xenon Console",
-    verification_code: "",
   });
   const [challengeError, setChallengeError] = useState<string | null>(null);
   const [challengeLoading, setChallengeLoading] = useState(false);
+  const [cancelingChallengeId, setCancelingChallengeId] = useState<string | null>(null);
   const [challenges, setChallenges] = useState<ActiveChallenge[]>([]);
-
-  const [approveInputs, setApproveInputs] = useState<Record<string, string>>({});
 
   const baseUrl = useMemo(() => backendUrl.replace(/\/$/, ""), [backendUrl]);
 
@@ -251,30 +248,25 @@ export default function App() {
       if (!response.ok) throw new Error(`Backend ${response.status}`);
 
       await refreshChallenges();
-      setNewChallenge((current) => ({ ...current, verification_code: "" }));
     } catch (error) {
       setChallengeError(error instanceof Error ? error.message : "Could not create request");
       setChallengeLoading(false);
     }
   };
 
-  const respond = async (challengeId: string, action: "approve" | "deny") => {
-    setChallengeLoading(true);
+  const cancelChallenge = async (challengeId: string) => {
+    setCancelingChallengeId(challengeId);
     try {
       setChallengeError(null);
-      const response = await fetch(`${baseUrl}/active/challenges/${challengeId}/${action}`, {
+      const response = await fetch(`${baseUrl}/active/challenges/${challengeId}/deny`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body:
-          action === "approve"
-            ? JSON.stringify({ verification_code: (approveInputs[challengeId] || "").trim() })
-            : undefined,
       });
       if (!response.ok) throw new Error(`Backend ${response.status}`);
       await refreshChallenges();
     } catch (error) {
-      setChallengeError(error instanceof Error ? error.message : "Request action failed");
-      setChallengeLoading(false);
+      setChallengeError(error instanceof Error ? error.message : "Could not cancel request");
+    } finally {
+      setCancelingChallengeId(null);
     }
   };
 
@@ -285,7 +277,7 @@ export default function App() {
     void refreshChallenges();
     const timer = window.setInterval(() => {
       void refreshChallenges();
-    }, 15000);
+    }, 3000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [baseUrl]);
@@ -488,17 +480,6 @@ export default function App() {
                   onChange={(event) => setNewChallenge((current) => ({ ...current, message: event.target.value }))}
                   fullWidth
                 />
-                <TextField
-                  label="Verification code (optional 3 digits)"
-                  value={newChallenge.verification_code}
-                  onChange={(event) =>
-                    setNewChallenge((current) => ({
-                      ...current,
-                      verification_code: event.target.value.replace(/\D+/g, "").slice(0, 3),
-                    }))
-                  }
-                  fullWidth
-                />
               </Stack>
 
               <Stack direction="row" spacing={1.5}>
@@ -560,39 +541,26 @@ export default function App() {
 
                         {challenge.status === "pending" ? (
                           <Stack direction={{ xs: "column", md: "row" }} spacing={1}>
-                            <TextField
-                              label="Code on phone"
-                              value={approveInputs[challenge.id] || ""}
-                              onChange={(event) =>
-                                setApproveInputs((current) => ({
-                                  ...current,
-                                  [challenge.id]: event.target.value.replace(/\D+/g, "").slice(0, 3),
-                                }))
-                              }
-                              size="small"
-                              sx={{ minWidth: { md: 180 } }}
-                            />
-                            <Button
-                              variant="contained"
-                              color="success"
-                              startIcon={<LockOpenRoundedIcon />}
-                              onClick={() => void respond(challenge.id, "approve")}
-                            >
-                              Approve
-                            </Button>
+                            <Stack direction="row" spacing={1} alignItems="center" sx={{ px: 0.5 }}>
+                              <CircularProgress size={16} />
+                              <Typography variant="body2" color="text.secondary">
+                                Pending...
+                              </Typography>
+                            </Stack>
                             <Button
                               variant="outlined"
                               color="error"
                               startIcon={<BlockRoundedIcon />}
-                              onClick={() => void respond(challenge.id, "deny")}
+                              disabled={cancelingChallengeId === challenge.id}
+                              onClick={() => void cancelChallenge(challenge.id)}
                             >
-                              Deny
+                              {cancelingChallengeId === challenge.id ? "Canceling..." : "Cancel"}
                             </Button>
                           </Stack>
                         ) : (
-                          <Button variant="outlined" startIcon={<LockRoundedIcon />} disabled>
-                            Request closed
-                          </Button>
+                          <Typography variant="caption" color="text.secondary">
+                            Request closed.
+                          </Typography>
                         )}
                       </Stack>
                     </Paper>

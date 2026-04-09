@@ -86,7 +86,7 @@ function useRefreshWindow() {
   return {
     progress: normalizedElapsed / STEP_SECONDS,
     secondsLeft: Math.max(1, Math.ceil(STEP_SECONDS - normalizedElapsed)),
-    windowIndex: Math.floor(elapsedMs / (STEP_SECONDS * 1000)),
+    windowIndex: Math.floor(now / (STEP_SECONDS * 1000)),
     resetWindow: () => {
       const ts = Date.now();
       setAnchorMs(ts);
@@ -340,24 +340,40 @@ function AppShell() {
     syncCodesInFlightRef.current = true;
     setLoadingCodes(true);
     try {
+      const fetchWordsForTime = async (secret: string, unixTime?: number): Promise<string[]> => {
+        const response = await fetch(`${BACKEND_URL}/preview/words`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            secret_key: secret,
+            ...(unixTime ? { unix_time: unixTime } : {}),
+          }),
+        });
+        if (!response.ok) throw new Error(`Backend ${response.status}`);
+
+        const payload = (await response.json()) as { words?: unknown };
+        if (!Array.isArray(payload.words) || payload.words.length !== 3) {
+          throw new Error("Invalid response");
+        }
+        return payload.words.map((word) => String(word).toUpperCase());
+      };
+
       const updates = await Promise.all(
         accounts.map(async (account) => {
           try {
-            const response = await fetch(`${BACKEND_URL}/preview/words`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ secret_key: account.secret }),
-            });
-            if (!response.ok) throw new Error(`Backend ${response.status}`);
+            let words = await fetchWordsForTime(account.secret);
 
-            const payload = (await response.json()) as { words?: unknown };
-            if (!Array.isArray(payload.words) || payload.words.length !== 3) {
-              throw new Error("Invalid response");
+            if (
+              options?.resetTimer &&
+              words.join("|") === account.words.join("|")
+            ) {
+              const nextWindowTime = Math.floor(Date.now() / 1000) + STEP_SECONDS;
+              words = await fetchWordsForTime(account.secret, nextWindowTime);
             }
 
             return {
               id: account.id,
-              words: payload.words.map((word) => String(word).toUpperCase()),
+              words,
               lastUpdated: new Date().toLocaleTimeString(),
               error: null,
             };
