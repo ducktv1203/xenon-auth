@@ -57,6 +57,12 @@ class ActiveChallengeCreateRequest(BaseModel):
         default=None,
         description="Optional 3-digit code shown on the sign-in screen",
     )
+    ttl_seconds: int | None = Field(
+        default=None,
+        ge=15,
+        le=900,
+        description="Optional request expiry override in seconds",
+    )
 
 
 class ActiveChallengeApproveRequest(BaseModel):
@@ -91,6 +97,8 @@ def _create_challenge(payload: ActiveChallengeCreateRequest) -> dict[str, object
     if len(raw_code) != 3 or not raw_code.isdigit():
         raise HTTPException(status_code=400, detail="verification_code must be a 3-digit string")
 
+    ttl_seconds = payload.ttl_seconds or _ACTIVE_CHALLENGE_TTL_SECONDS
+
     return {
         "id": challenge_id,
         "user": payload.user,
@@ -101,7 +109,7 @@ def _create_challenge(payload: ActiveChallengeCreateRequest) -> dict[str, object
         "verification_code": raw_code,
         "status": "pending",
         "created_at": now,
-        "expires_at": now + _ACTIVE_CHALLENGE_TTL_SECONDS,
+        "expires_at": now + ttl_seconds,
         "responded_at": None,
     }
 
@@ -219,7 +227,7 @@ def approve_active_challenge(challenge_id: str, payload: ActiveChallengeApproveR
     if record["status"] != "pending":
         raise HTTPException(status_code=409, detail=f'Challenge is already {record["status"]}')
     if str(record["verification_code"]) != payload.verification_code.strip():
-        raise HTTPException(status_code=400, detail="Invalid verification code")
+        return _set_challenge_status(challenge_id, "denied")
     return _set_challenge_status(challenge_id, "approved")
 
 

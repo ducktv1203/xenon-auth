@@ -67,7 +67,7 @@ def test_approve_and_deny_challenges() -> None:
     assert {item["id"] for item in denied} == {second["id"]}
 
 
-def test_approve_rejects_wrong_verification_code() -> None:
+def test_approve_wrong_verification_code_auto_denies() -> None:
     challenge = client.post(
         "/active/challenges",
         json={"user": "dina@example.com", "application": "Xenon Admin", "verification_code": "777"},
@@ -78,7 +78,23 @@ def test_approve_rejects_wrong_verification_code() -> None:
         json={"verification_code": "123"},
     )
 
-    assert response.status_code == 400
+    assert response.status_code == 200
+    assert response.json()["status"] == "denied"
+
+
+def test_create_challenge_with_custom_ttl() -> None:
+    response = client.post(
+        "/active/challenges",
+        json={
+            "user": "erin@example.com",
+            "application": "Xenon Portal",
+            "ttl_seconds": 300,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["expires_at"] - payload["created_at"] == 300
 
 
 def test_setup_uri_endpoint() -> None:

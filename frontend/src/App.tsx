@@ -68,6 +68,7 @@ export default function App() {
     location: "New York, US",
     device_label: "Chrome on Windows",
     message: "Approve sign-in for Xenon Console",
+    ttl_seconds: 120,
   });
   const [challengeError, setChallengeError] = useState<string | null>(null);
   const [challengeLoading, setChallengeLoading] = useState(false);
@@ -243,7 +244,10 @@ export default function App() {
       const response = await fetch(`${baseUrl}/active/challenges`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newChallenge),
+        body: JSON.stringify({
+          ...newChallenge,
+          ttl_seconds: Math.max(15, Math.min(900, Number(newChallenge.ttl_seconds) || 120)),
+        }),
       });
       if (!response.ok) throw new Error(`Backend ${response.status}`);
 
@@ -479,6 +483,20 @@ export default function App() {
                   value={newChallenge.message}
                   onChange={(event) => setNewChallenge((current) => ({ ...current, message: event.target.value }))}
                   fullWidth
+                />
+                <TextField
+                  label="Request timeout (seconds)"
+                  type="number"
+                  value={newChallenge.ttl_seconds}
+                  onChange={(event) =>
+                    setNewChallenge((current) => ({
+                      ...current,
+                      ttl_seconds: Number(event.target.value || 120),
+                    }))
+                  }
+                  slotProps={{ htmlInput: { min: 15, max: 900, step: 5 } }}
+                  helperText="Allowed range: 15 to 900 seconds."
+                  sx={{ minWidth: { md: 240 } }}
                 />
               </Stack>
 
