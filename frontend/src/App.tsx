@@ -23,6 +23,10 @@ import QrCodeRoundedIcon from "@mui/icons-material/QrCodeRounded";
 import BlockRoundedIcon from "@mui/icons-material/BlockRounded";
 import AddRoundedIcon from "@mui/icons-material/AddRounded";
 import DeleteOutlineRoundedIcon from "@mui/icons-material/DeleteOutlineRounded";
+import ExpandMoreRoundedIcon from "@mui/icons-material/ExpandMoreRounded";
+import ExpandLessRoundedIcon from "@mui/icons-material/ExpandLessRounded";
+import CheckCircleOutlineRoundedIcon from "@mui/icons-material/CheckCircleOutlineRounded";
+import LinkOffRoundedIcon from "@mui/icons-material/LinkOffRounded";
 import { QRCodeSVG } from "qrcode.react";
 import { BrandLogo } from "./BrandLogo";
 
@@ -52,9 +56,50 @@ type DemoPortal = {
   secret: string;
   setupUri: string;
   createdAt: string;
+  connected: boolean;
 };
 
 const BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+const ENGLISH_ADJECTIVES = [
+  "bright",
+  "swift",
+  "noble",
+  "solid",
+  "crystal",
+  "bold",
+  "prime",
+  "lucky",
+  "secure",
+  "vivid",
+];
+const ENGLISH_NOUNS = [
+  "falcon",
+  "river",
+  "forest",
+  "bridge",
+  "harbor",
+  "lighthouse",
+  "summit",
+  "station",
+  "circle",
+  "signal",
+];
+const ENGLISH_TEAMS = [
+  "Northstar",
+  "Blue Harbor",
+  "Summit Gate",
+  "Riverfield",
+  "Silver Grove",
+  "Atlas Point",
+  "Beacon Works",
+  "Clearpath",
+  "Oakline",
+  "Stonebridge",
+];
+
+function pickRandom<T>(items: T[]): T {
+  return items[Math.floor(Math.random() * items.length)];
+}
 
 function generateBase32Secret(length = 16) {
   let out = "";
@@ -64,20 +109,30 @@ function generateBase32Secret(length = 16) {
   return out;
 }
 
+function generateRandomPortalDraft() {
+  const adjective = pickRandom(ENGLISH_ADJECTIVES);
+  const noun = pickRandom(ENGLISH_NOUNS);
+  const suffix = Math.floor(Math.random() * 900 + 100);
+  const team = pickRandom(ENGLISH_TEAMS);
+
+  return {
+    accountName: `${adjective}.${noun}${suffix}@demo.auth`,
+    issuerName: `${team} Access`,
+    secretKey: generateBase32Secret(),
+  };
+}
+
 export default function App() {
   const [tab, setTab] = useState<PortalTab>("codes");
   const [backendUrl, setBackendUrl] = useState(DEFAULT_BACKEND_URL);
   const [health, setHealth] = useState<"checking" | "online" | "offline">("checking");
 
   const [secretKey, setSecretKey] = useState(DEFAULT_SECRET);
-  const [portalDraft, setPortalDraft] = useState({
-    accountName: "user@xenon",
-    issuerName: "Xenon Auth",
-    secretKey: generateBase32Secret(),
-  });
+  const [portalDraft, setPortalDraft] = useState(() => generateRandomPortalDraft());
   const [portalError, setPortalError] = useState<string | null>(null);
   const [portalLoading, setPortalLoading] = useState(false);
   const [demoPortals, setDemoPortals] = useState<DemoPortal[]>([]);
+  const [expandedPortalIds, setExpandedPortalIds] = useState<string[]>([]);
 
   const [previewWords, setPreviewWords] = useState<string[]>(["----", "----", "----"]);
   const [previewError, setPreviewError] = useState<string | null>(null);
@@ -249,17 +304,12 @@ export default function App() {
           secret: normalizedSecret,
           setupUri,
           createdAt: new Date().toLocaleTimeString(),
+          connected: false,
         },
         ...current,
       ]);
 
-      setPortalDraft((current) => ({
-        ...current,
-        accountName: current.accountName.includes("+")
-          ? current.accountName.replace(/\+\d+(?=@)/, (match) => `+${Number(match.slice(1)) + 1}`)
-          : current.accountName.replace("@", "+2@"),
-        secretKey: generateBase32Secret(),
-      }));
+      setPortalDraft(generateRandomPortalDraft());
     } catch (error) {
       setPortalError(error instanceof Error ? error.message : "Could not create demo portal");
     } finally {
@@ -269,6 +319,21 @@ export default function App() {
 
   const deleteDemoPortal = (portalId: string) => {
     setDemoPortals((current) => current.filter((portal) => portal.id !== portalId));
+    setExpandedPortalIds((current) => current.filter((id) => id !== portalId));
+  };
+
+  const togglePortalExpanded = (portalId: string) => {
+    setExpandedPortalIds((current) =>
+      current.includes(portalId) ? current.filter((id) => id !== portalId) : [...current, portalId],
+    );
+  };
+
+  const togglePortalConnected = (portalId: string) => {
+    setDemoPortals((current) =>
+      current.map((portal) =>
+        portal.id === portalId ? { ...portal, connected: !portal.connected } : portal,
+      ),
+    );
   };
 
   const refreshChallenges = async () => {
@@ -443,15 +508,16 @@ export default function App() {
                 />
                 <Button
                   variant="outlined"
-                  sx={{ minWidth: { md: 210 } }}
-                  onClick={() =>
-                    setPortalDraft((current) => ({
-                      ...current,
-                      secretKey: generateBase32Secret(),
-                    }))
-                  }
+                  sx={{
+                    alignSelf: { xs: "stretch", md: "flex-start" },
+                    minWidth: { md: 210 },
+                    height: 56,
+                    whiteSpace: "nowrap",
+                    px: 1.5,
+                  }}
+                  onClick={() => setPortalDraft(generateRandomPortalDraft())}
                 >
-                  Randomize secret
+                  Randomize demo fields
                 </Button>
               </Stack>
 
@@ -463,14 +529,6 @@ export default function App() {
                   onClick={() => void createDemoPortal()}
                 >
                   {portalLoading ? "Creating..." : "Create demo portal"}
-                </Button>
-                <Button
-                  variant="outlined"
-                  startIcon={<RefreshRoundedIcon />}
-                  disabled={previewLoading}
-                  onClick={() => void verifyPhonePhrase()}
-                >
-                  {previewLoading ? "Checking" : "Check phrase from phone"}
                 </Button>
               </Stack>
 
@@ -489,6 +547,7 @@ export default function App() {
                         label={`Word ${index + 1}`}
                         placeholder="WORD"
                         value={phonePhraseParts[index]}
+                        disabled={demoPortals.length === 0}
                         onChange={(event) => setPhrasePart(index, event.target.value)}
                         onKeyDown={(event) => void onPhraseFieldKeyDown(event, index)}
                         onPaste={onPhrasePaste}
@@ -502,6 +561,21 @@ export default function App() {
                   <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
                     Use Tab to move between fields. Press Enter to check phrase.
                   </Typography>
+                  {demoPortals.length === 0 ? (
+                    <Typography variant="caption" color="warning.main" sx={{ display: "block", mt: 0.75 }}>
+                      Create at least one demo portal before phrase verification.
+                    </Typography>
+                  ) : null}
+                  <Box sx={{ display: "flex", justifyContent: "flex-end", mt: 1 }}>
+                    <Button
+                      variant="outlined"
+                      startIcon={<RefreshRoundedIcon />}
+                      disabled={previewLoading || demoPortals.length === 0}
+                      onClick={() => void verifyPhonePhrase()}
+                    >
+                      {previewLoading ? "Checking" : "Check phrase from phone"}
+                    </Button>
+                  </Box>
                   {verifyResult ? (
                     <Alert severity={verifyResult.ok ? "success" : "warning"} sx={{ mt: 1.5 }}>
                       {verifyResult.message}
@@ -518,31 +592,72 @@ export default function App() {
                       {demoPortals.map((portal) => (
                         <Paper key={portal.id} sx={{ p: 1.5, border: "1px solid #2C2C2C", bgcolor: "#111" }}>
                           <Box sx={{ display: "grid", gap: 1 }}>
-                            <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                              {portal.issuer}
-                            </Typography>
-                            <Typography variant="caption" color="text.secondary">
-                              {portal.account} · Created {portal.createdAt}
-                            </Typography>
-                            <Box sx={{ display: "flex", justifyContent: "center", py: 0.5 }}>
-                              <Box sx={{ backgroundColor: "#fff", p: 0.8, borderRadius: 1 }}>
-                                <QRCodeSVG value={portal.setupUri} size={130} />
+                            <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 1 }}>
+                              <Box sx={{ minWidth: 0 }}>
+                                <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                                  {portal.issuer}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  {portal.account} · Created {portal.createdAt}
+                                </Typography>
                               </Box>
+                              <Stack direction="row" spacing={0.8}>
+                                <Button
+                                  size="small"
+                                  variant={portal.connected ? "contained" : "outlined"}
+                                  color={portal.connected ? "success" : "inherit"}
+                                  startIcon={portal.connected ? <CheckCircleOutlineRoundedIcon /> : <LinkOffRoundedIcon />}
+                                  onClick={() => togglePortalConnected(portal.id)}
+                                >
+                                  {portal.connected ? "Connected" : "Not connected"}
+                                </Button>
+                                <Button
+                                  size="small"
+                                  variant="outlined"
+                                  onClick={() => togglePortalExpanded(portal.id)}
+                                  endIcon={
+                                    expandedPortalIds.includes(portal.id) ? (
+                                      <ExpandLessRoundedIcon />
+                                    ) : (
+                                      <ExpandMoreRoundedIcon />
+                                    )
+                                  }
+                                >
+                                  Details
+                                </Button>
+                              </Stack>
                             </Box>
-                            <TextField
-                              label="Setup URI"
-                              value={portal.setupUri}
-                              multiline
-                              minRows={2}
-                              fullWidth
-                              slotProps={{ input: { readOnly: true } }}
-                            />
-                            <TextField
-                              label="Secret"
-                              value={portal.secret}
-                              fullWidth
-                              slotProps={{ input: { readOnly: true } }}
-                            />
+
+                            {portal.connected && !expandedPortalIds.includes(portal.id) ? (
+                              <Typography variant="caption" color="success.main">
+                                Connected. QR/URI is hidden. Expand details to view.
+                              </Typography>
+                            ) : null}
+
+                            {expandedPortalIds.includes(portal.id) ? (
+                              <>
+                                <Box sx={{ display: "flex", justifyContent: "center", py: 0.5 }}>
+                                  <Box sx={{ backgroundColor: "#fff", p: 0.8, borderRadius: 1 }}>
+                                    <QRCodeSVG value={portal.setupUri} size={130} />
+                                  </Box>
+                                </Box>
+                                <TextField
+                                  label="Setup URI"
+                                  value={portal.setupUri}
+                                  multiline
+                                  minRows={2}
+                                  fullWidth
+                                  slotProps={{ input: { readOnly: true } }}
+                                />
+                                <TextField
+                                  label="Secret"
+                                  value={portal.secret}
+                                  fullWidth
+                                  slotProps={{ input: { readOnly: true } }}
+                                />
+                              </>
+                            ) : null}
+
                             <Button
                               variant="outlined"
                               color="error"
@@ -579,7 +694,7 @@ export default function App() {
                                 {portal.issuer} / {portal.account}
                               </Typography>
                               <Typography variant="caption" color="text.secondary">
-                                {portal.createdAt}
+                                {portal.connected ? "Connected" : "Not connected"}
                               </Typography>
                             </Box>
                           ))}
