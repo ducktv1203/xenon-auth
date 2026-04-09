@@ -2,27 +2,27 @@ import { createTheme, alpha } from "@mui/material/styles";
 
 export const appTheme = createTheme({
   palette: {
-    mode: "light",
+    mode: "dark",
     primary: {
-      main: "#f97316",
-      dark: "#ea580c",
-      contrastText: "#ffffff",
+      main: "#ff5f1f",
+      dark: "#e24c0f",
+      contrastText: "#0d0d0d",
     },
     secondary: {
-      main: "#0f172a",
+      main: "#94a3b8",
     },
     background: {
-      default: "#f6f4ef",
-      paper: "#ffffff",
+      default: "#0d0d0d",
+      paper: "#161616",
     },
     text: {
-      primary: "#0f172a",
-      secondary: "#475569",
+      primary: "#f8fafc",
+      secondary: "#a1a1aa",
     },
-    divider: "#e2e8f0",
+    divider: "#2f2f2f",
   },
   shape: {
-    borderRadius: 18,
+    borderRadius: 16,
   },
   typography: {
     fontFamily: ["Segoe UI", "system-ui", "sans-serif"].join(","),
@@ -56,7 +56,7 @@ export const appTheme = createTheme({
       styleOverrides: {
         root: {
           backgroundImage: "none",
-          boxShadow: "0 14px 34px rgba(15, 23, 42, 0.06)",
+          boxShadow: "0 14px 34px rgba(0, 0, 0, 0.35)",
         },
       },
     },
@@ -64,7 +64,7 @@ export const appTheme = createTheme({
       styleOverrides: {
         root: {
           borderRadius: 999,
-          backgroundColor: alpha("#0f172a", 0.08),
+          backgroundColor: alpha("#ffffff", 0.08),
         },
         bar: {
           borderRadius: 999,
@@ -74,9 +74,9 @@ export const appTheme = createTheme({
     MuiCard: {
       styleOverrides: {
         root: {
-          borderRadius: 24,
-          border: "1px solid #e2e8f0",
-          boxShadow: "0 14px 34px rgba(15, 23, 42, 0.06)",
+          borderRadius: 20,
+          border: "1px solid #2f2f2f",
+          boxShadow: "0 14px 34px rgba(0, 0, 0, 0.35)",
         },
       },
     },
