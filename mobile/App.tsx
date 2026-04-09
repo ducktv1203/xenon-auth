@@ -3,12 +3,16 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
-  SafeAreaView,
   ScrollView,
   Text,
   TextInput,
   View,
 } from "react-native";
+import {
+  SafeAreaProvider,
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 
 const STEP_SECONDS = 60;
 const DEFAULT_SECRET = "JBSWY3DPEHPK3PXP";
@@ -149,7 +153,16 @@ function SegmentedProgress({
 }
 
 export default function App() {
+  return (
+    <SafeAreaProvider>
+      <AppShell />
+    </SafeAreaProvider>
+  );
+}
+
+function AppShell() {
   const { progress, secondsLeft, windowIndex } = useRefreshWindow();
+  const insets = useSafeAreaInsets();
   const [tab, setTab] = useState<MobileTab>("status");
   const [backendUrl, setBackendUrl] = useState(DEFAULT_BACKEND_URL);
   const [secretKey, setSecretKey] = useState(DEFAULT_SECRET);
@@ -203,9 +216,17 @@ export default function App() {
   }, [backendUrl, secretKey, windowIndex, autoPreview]);
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.bg }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.bg }} edges={["top", "left", "right"]}>
       <StatusBar style="light" backgroundColor={COLORS.bg} translucent={false} />
-      <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={{ padding: 16, paddingTop: 22, gap: 14 }}>
+      <ScrollView
+        contentInsetAdjustmentBehavior="automatic"
+        contentContainerStyle={{
+          paddingHorizontal: 16,
+          paddingTop: Math.max(insets.top, 16) + 8,
+          paddingBottom: Math.max(insets.bottom, 16) + 24,
+          gap: 14,
+        }}
+      >
         <View
           style={{
             backgroundColor: COLORS.card,
