@@ -2,7 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { setStringAsync } from "expo-clipboard";
 import { StatusBar } from "expo-status-bar";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Modal,
@@ -72,17 +72,26 @@ function pressFeedback(pressed: boolean, busy = false) {
 
 function useRefreshWindow() {
   const [now, setNow] = useState(() => Date.now());
+  const [anchorMs, setAnchorMs] = useState(() => Date.now());
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 500);
     return () => clearInterval(id);
   }, []);
 
-  const elapsed = (now / 1000) % STEP_SECONDS;
+  const elapsedMs = Math.max(0, now - anchorMs);
+  const elapsed = (elapsedMs / 1000) % STEP_SECONDS;
+  const normalizedElapsed = elapsed < 0 ? elapsed + STEP_SECONDS : elapsed;
+
   return {
-    progress: elapsed / STEP_SECONDS,
-    secondsLeft: Math.ceil(STEP_SECONDS - elapsed),
-    windowIndex: Math.floor(now / (STEP_SECONDS * 1000)),
+    progress: normalizedElapsed / STEP_SECONDS,
+    secondsLeft: Math.max(1, Math.ceil(STEP_SECONDS - normalizedElapsed)),
+    windowIndex: Math.floor(elapsedMs / (STEP_SECONDS * 1000)),
+    resetWindow: () => {
+      const ts = Date.now();
+      setAnchorMs(ts);
+      setNow(ts);
+    },
   };
 }
 
@@ -256,11 +265,13 @@ function ChallengeCard({
 
 function AppShell() {
   const insets = useSafeAreaInsets();
-  const { progress, secondsLeft, windowIndex } = useRefreshWindow();
+  const { progress, secondsLeft, windowIndex, resetWindow } = useRefreshWindow();
   const [mode, setMode] = useState<Mode>("passive");
 
   const [accounts, setAccounts] = useState<AccountItem[]>([]);
   const [loadingCodes, setLoadingCodes] = useState(false);
+  const syncCodesInFlightRef = useRef(false);
+  const pendingManualRefreshRef = useRef(false);
   const [pasteUri, setPasteUri] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
@@ -317,8 +328,16 @@ function AppShell() {
     }
   };
 
-  const syncAccountCodes = async () => {
+  const syncAccountCodes = async (options?: { resetTimer?: boolean }) => {
     if (accounts.length === 0) return;
+    if (syncCodesInFlightRef.current) {
+      if (options?.resetTimer) {
+        pendingManualRefreshRef.current = true;
+      }
+      return;
+    }
+
+    syncCodesInFlightRef.current = true;
     setLoadingCodes(true);
     try {
       const updates = await Promise.all(
@@ -366,7 +385,17 @@ function AppShell() {
             : account;
         }),
       );
+
+      if (options?.resetTimer) {
+        resetWindow();
+      }
     } finally {
+      syncCodesInFlightRef.current = false;
+      if (pendingManualRefreshRef.current) {
+        pendingManualRefreshRef.current = false;
+        void syncAccountCodes({ resetTimer: true });
+        return;
+      }
       setLoadingCodes(false);
     }
   };
@@ -620,9 +649,9 @@ function AppShell() {
                   </View>
 
                   <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
-                    {account.words.map((word) => (
+                    {account.words.map((word, index) => (
                       <View
-                        key={`${account.id}-${word}`}
+                        key={`${account.id}-${index}-${word}`}
                         style={{
                           flexGrow: 1,
                           minWidth: 80,
@@ -657,7 +686,8 @@ function AppShell() {
             )}
 
             <Pressable
-              onPress={() => void syncAccountCodes()}
+              onPress={() => void syncAccountCodes({ resetTimer: true })}
+              disabled={loadingCodes || accounts.length === 0}
               style={({ pressed }) => ({
                 borderWidth: 1,
                 borderColor: COLORS.primary,
@@ -665,7 +695,7 @@ function AppShell() {
                 backgroundColor: COLORS.primarySoft,
                 paddingVertical: 11,
                 alignItems: "center",
-                ...pressFeedback(pressed, loadingCodes),
+                ...pressFeedback(pressed, loadingCodes || accounts.length === 0),
               })}
             >
               <Text style={{ color: COLORS.text, fontSize: 13, fontWeight: "800" }}>
@@ -930,7 +960,7 @@ function AppShell() {
         </View>
       </Modal>
 
-      {(loadingCodes || loadingChallenges) ? (
+      {(loadingCodes || (mode === "active" && loadingChallenges)) ? (
         <View style={{ position: "absolute", bottom: Math.max(insets.bottom, 14), right: 14 }}>
           <View style={{ borderRadius: 999, backgroundColor: COLORS.cardSoft, borderWidth: 1, borderColor: COLORS.border, paddingHorizontal: 12, paddingVertical: 8, flexDirection: "row", alignItems: "center", gap: 8 }}>
             <ActivityIndicator color={COLORS.primary} size="small" />

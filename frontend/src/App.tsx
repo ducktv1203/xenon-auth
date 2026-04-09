@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   AppBar,
@@ -59,6 +59,9 @@ export default function App() {
   const [previewWords, setPreviewWords] = useState<string[]>(["----", "----", "----"]);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [phonePhraseParts, setPhonePhraseParts] = useState<[string, string, string]>(["", "", ""]);
+  const [verifyResult, setVerifyResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const phraseFieldRefs = useRef<Array<HTMLInputElement | null>>([]);
 
   const [newChallenge, setNewChallenge] = useState({
     user: "user@xenon",
@@ -103,6 +106,91 @@ export default function App() {
       setPreviewWords(payload.words.map((word) => String(word).toUpperCase()));
     } catch (error) {
       setPreviewError(error instanceof Error ? error.message : "Preview sync failed");
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const normalizePhrase = (value: string) =>
+    value
+      .toUpperCase()
+      .split(/[^A-Z0-9]+/)
+      .filter(Boolean)
+      .slice(0, 3);
+
+  const sanitizeWord = (value: string) => value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+  const setPhrasePart = (index: 0 | 1 | 2, value: string) => {
+    const cleaned = sanitizeWord(value);
+    setPhonePhraseParts((current) => {
+      const next: [string, string, string] = [...current] as [string, string, string];
+      next[index] = cleaned;
+      return next;
+    });
+  };
+
+  const onPhraseFieldKeyDown = async (
+    event: React.KeyboardEvent<HTMLDivElement>,
+    index: 0 | 1 | 2,
+  ) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      await verifyPhonePhrase();
+      return;
+    }
+
+    if (event.key === "Backspace" && !phonePhraseParts[index] && index > 0) {
+      phraseFieldRefs.current[index - 1]?.focus();
+    }
+  };
+
+  const onPhrasePaste = (event: React.ClipboardEvent<HTMLDivElement>) => {
+    const pasted = event.clipboardData.getData("text");
+    const tokens = normalizePhrase(pasted);
+    if (tokens.length === 0) return;
+
+    event.preventDefault();
+    setPhonePhraseParts([tokens[0] || "", tokens[1] || "", tokens[2] || ""]);
+    const focusIndex = Math.min(2, Math.max(0, tokens.length - 1));
+    phraseFieldRefs.current[focusIndex]?.focus();
+  };
+
+  const verifyPhonePhrase = async () => {
+    setPreviewLoading(true);
+    try {
+      setPreviewError(null);
+      setVerifyResult(null);
+
+      const response = await fetch(`${baseUrl}/preview/words`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ secret_key: secretKey }),
+      });
+      if (!response.ok) throw new Error(`Backend ${response.status}`);
+
+      const payload = (await response.json()) as { words?: unknown };
+      if (!Array.isArray(payload.words) || payload.words.length !== 3) {
+        throw new Error("Invalid preview response");
+      }
+
+      const expected = payload.words.map((word) => String(word).toUpperCase());
+      setPreviewWords(expected);
+
+      const actual = phonePhraseParts.map((part) => sanitizeWord(part)).filter(Boolean);
+      if (actual.length !== 3) {
+        setVerifyResult({ ok: false, message: "Enter exactly 3 words from your phone." });
+        return;
+      }
+
+      const matched = actual.every((word, index) => word === expected[index]);
+      setVerifyResult({
+        ok: matched,
+        message: matched
+          ? "Phrase is valid for the current window."
+          : "Phrase does not match the current window. Refresh code on phone and try again.",
+      });
+    } catch (error) {
+      setPreviewError(error instanceof Error ? error.message : "Phrase verification failed");
     } finally {
       setPreviewLoading(false);
     }
@@ -258,7 +346,7 @@ export default function App() {
           <Card sx={{ border: "1px solid #242424", bgcolor: "#111" }}>
             <CardContent sx={{ display: "grid", gap: 2.5 }}>
               <Typography variant="h6" sx={{ fontWeight: 800 }}>
-                Setup URI and token preview
+                Setup URI and phone phrase verifier
               </Typography>
               <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
                 <TextField
@@ -293,9 +381,9 @@ export default function App() {
                   variant="outlined"
                   startIcon={<RefreshRoundedIcon />}
                   disabled={previewLoading}
-                  onClick={() => void refreshPreview()}
+                  onClick={() => void verifyPhonePhrase()}
                 >
-                  {previewLoading ? "Syncing" : "Refresh preview"}
+                  {previewLoading ? "Checking" : "Check phrase from phone"}
                 </Button>
               </Stack>
 
@@ -305,13 +393,33 @@ export default function App() {
               <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
                 <Paper sx={{ p: 2, flex: 1, border: "1px solid #242424", bgcolor: "#0E0E0E" }}>
                   <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                    Current 3-word token
+                    Phrase entered from phone
                   </Typography>
-                  <Stack direction="row" spacing={1}>
-                    {previewWords.map((word) => (
-                      <Chip key={word} label={word} color="primary" variant="outlined" />
+                  <Box sx={{ display: "grid", gap: 1.2, gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
+                    {([0, 1, 2] as const).map((index) => (
+                      <TextField
+                        key={`phrase-field-${index}`}
+                        label={`Word ${index + 1}`}
+                        placeholder="WORD"
+                        value={phonePhraseParts[index]}
+                        onChange={(event) => setPhrasePart(index, event.target.value)}
+                        onKeyDown={(event) => void onPhraseFieldKeyDown(event, index)}
+                        onPaste={onPhrasePaste}
+                        inputRef={(node) => {
+                          phraseFieldRefs.current[index] = node;
+                        }}
+                        fullWidth
+                      />
                     ))}
-                  </Stack>
+                  </Box>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
+                    Use Tab to move between fields. Press Enter to check phrase.
+                  </Typography>
+                  {verifyResult ? (
+                    <Alert severity={verifyResult.ok ? "success" : "warning"} sx={{ mt: 1.5 }}>
+                      {verifyResult.message}
+                    </Alert>
+                  ) : null}
                 </Paper>
 
                 <Paper sx={{ p: 2, flex: 1, border: "1px solid #242424", bgcolor: "#0E0E0E" }}>
