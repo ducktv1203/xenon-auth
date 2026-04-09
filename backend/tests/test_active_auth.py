@@ -22,6 +22,7 @@ def test_create_and_list_pending_challenge() -> None:
             "location": "London, UK",
             "device_label": "Chrome on Mac",
             "message": "Approve VPN sign-in",
+            "verification_code": "321",
         },
     )
 
@@ -29,6 +30,7 @@ def test_create_and_list_pending_challenge() -> None:
     challenge = response.json()
     assert challenge["status"] == "pending"
     assert challenge["user"] == "alice@example.com"
+    assert challenge["verification_code"] == "321"
 
     list_response = client.get("/active/challenges")
     assert list_response.status_code == 200
@@ -40,14 +42,17 @@ def test_create_and_list_pending_challenge() -> None:
 def test_approve_and_deny_challenges() -> None:
     first = client.post(
         "/active/challenges",
-        json={"user": "bob@example.com", "application": "Xenon App"},
+        json={"user": "bob@example.com", "application": "Xenon App", "verification_code": "123"},
     ).json()
     second = client.post(
         "/active/challenges",
-        json={"user": "carol@example.com", "application": "Xenon Admin"},
+        json={"user": "carol@example.com", "application": "Xenon Admin", "verification_code": "456"},
     ).json()
 
-    approve_response = client.post(f"/active/challenges/{first['id']}/approve")
+    approve_response = client.post(
+        f"/active/challenges/{first['id']}/approve",
+        json={"verification_code": "123"},
+    )
     assert approve_response.status_code == 200
     assert approve_response.json()["status"] == "approved"
 
@@ -60,6 +65,20 @@ def test_approve_and_deny_challenges() -> None:
 
     assert {item["id"] for item in approved} == {first["id"]}
     assert {item["id"] for item in denied} == {second["id"]}
+
+
+def test_approve_rejects_wrong_verification_code() -> None:
+    challenge = client.post(
+        "/active/challenges",
+        json={"user": "dina@example.com", "application": "Xenon Admin", "verification_code": "777"},
+    ).json()
+
+    response = client.post(
+        f"/active/challenges/{challenge['id']}/approve",
+        json={"verification_code": "123"},
+    )
+
+    assert response.status_code == 400
 
 
 def test_setup_uri_endpoint() -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import random
 from threading import Lock
 from typing import Literal
 from urllib.parse import quote
@@ -52,6 +53,14 @@ class ActiveChallengeCreateRequest(BaseModel):
     location: str = Field(default="Unknown location", description="Login source or location")
     device_label: str = Field(default="Unknown device", description="Originating device label")
     message: str | None = Field(default=None, description="Custom display message")
+    verification_code: str | None = Field(
+        default=None,
+        description="Optional 3-digit code shown on the sign-in screen",
+    )
+
+
+class ActiveChallengeApproveRequest(BaseModel):
+    verification_code: str = Field(..., description="3-digit code shown during sign-in")
 
 
 class ActiveChallengeRecord(BaseModel):
@@ -61,6 +70,7 @@ class ActiveChallengeRecord(BaseModel):
     location: str
     device_label: str
     message: str
+    verification_code: str
     status: ChallengeStatus
     created_at: int
     expires_at: int
@@ -74,6 +84,13 @@ def _now_unix() -> int:
 def _create_challenge(payload: ActiveChallengeCreateRequest) -> dict[str, object]:
     now = _now_unix()
     challenge_id = uuid4().hex[:12]
+    if payload.verification_code is not None:
+        raw_code = payload.verification_code.strip()
+    else:
+        raw_code = f"{random.randint(0, 999):03d}"
+    if len(raw_code) != 3 or not raw_code.isdigit():
+        raise HTTPException(status_code=400, detail="verification_code must be a 3-digit string")
+
     return {
         "id": challenge_id,
         "user": payload.user,
@@ -81,6 +98,7 @@ def _create_challenge(payload: ActiveChallengeCreateRequest) -> dict[str, object
         "location": payload.location,
         "device_label": payload.device_label,
         "message": payload.message or f"Approve sign-in for {payload.application}",
+        "verification_code": raw_code,
         "status": "pending",
         "created_at": now,
         "expires_at": now + _ACTIVE_CHALLENGE_TTL_SECONDS,
@@ -196,7 +214,12 @@ def create_active_challenge(payload: ActiveChallengeCreateRequest) -> dict[str, 
 
 
 @app.post("/active/challenges/{challenge_id}/approve", response_model=ActiveChallengeRecord)
-def approve_active_challenge(challenge_id: str) -> dict[str, object]:
+def approve_active_challenge(challenge_id: str, payload: ActiveChallengeApproveRequest) -> dict[str, object]:
+    record = _get_challenge_or_404(challenge_id)
+    if record["status"] != "pending":
+        raise HTTPException(status_code=409, detail=f'Challenge is already {record["status"]}')
+    if str(record["verification_code"]) != payload.verification_code.strip():
+        raise HTTPException(status_code=400, detail="Invalid verification code")
     return _set_challenge_status(challenge_id, "approved")
 
 

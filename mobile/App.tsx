@@ -28,6 +28,7 @@ type ActiveChallenge = {
   location: string;
   device_label: string;
   message: string;
+  verification_code: string;
   status: ChallengeStatus;
   created_at: number;
   expires_at: number;
@@ -56,6 +57,18 @@ const COLORS = {
   success: "#16A34A",
   error: "#DC2626",
 };
+
+const MODE_LABELS: Record<Mode, string> = {
+  passive: "Codes",
+  active: "Sign-in requests",
+};
+
+function pressFeedback(pressed: boolean, busy = false) {
+  return {
+    opacity: (busy ? 0.7 : 1) * (pressed ? 0.78 : 1),
+    transform: [{ scale: pressed ? 0.985 : 1 }],
+  };
+}
 
 function useRefreshWindow() {
   const [now, setNow] = useState(() => Date.now());
@@ -127,11 +140,15 @@ function challengeTone(status: ChallengeStatus) {
 function ChallengeCard({
   challenge,
   busy,
+  approveCode,
+  onApproveCodeChange,
   onApprove,
   onDeny,
 }: {
   challenge: ActiveChallenge;
   busy: boolean;
+  approveCode: string;
+  onApproveCodeChange: (value: string) => void;
   onApprove: () => void;
   onDeny: () => void;
 }) {
@@ -175,11 +192,35 @@ function ChallengeCard({
       </Text>
 
       {challenge.status === "pending" ? (
-        <View style={{ flexDirection: "row", gap: 10 }}>
+        <View style={{ gap: 10 }}>
+          <View style={{ gap: 6 }}>
+            <Text style={{ color: COLORS.muted, fontSize: 12 }}>Enter code shown on sign-in screen</Text>
+            <TextInput
+              style={{
+                borderWidth: 1,
+                borderColor: COLORS.border,
+                borderRadius: 10,
+                paddingHorizontal: 12,
+                paddingVertical: 9,
+                color: COLORS.text,
+                backgroundColor: COLORS.card,
+                fontWeight: "700",
+                letterSpacing: 1.5,
+              }}
+              keyboardType="number-pad"
+              maxLength={3}
+              placeholder="3-digit code"
+              placeholderTextColor={COLORS.muted}
+              value={approveCode}
+              onChangeText={(text) => onApproveCodeChange(text.replace(/\D+/g, "").slice(0, 3))}
+            />
+          </View>
+
+          <View style={{ flexDirection: "row", gap: 10 }}>
           <Pressable
             onPress={onDeny}
             disabled={busy}
-            style={{
+            style={({ pressed }) => ({
               flex: 1,
               alignItems: "center",
               borderRadius: 999,
@@ -187,25 +228,26 @@ function ChallengeCard({
               borderWidth: 1,
               borderColor: COLORS.error,
               backgroundColor: "rgba(220,38,38,0.12)",
-              opacity: busy ? 0.7 : 1,
-            }}
+              ...pressFeedback(pressed, busy),
+            })}
           >
             <Text style={{ color: COLORS.text, fontWeight: "800", fontSize: 13 }}>Deny</Text>
           </Pressable>
           <Pressable
             onPress={onApprove}
             disabled={busy}
-            style={{
+            style={({ pressed }) => ({
               flex: 1,
               alignItems: "center",
               borderRadius: 999,
               paddingVertical: 11,
               backgroundColor: COLORS.primary,
-              opacity: busy ? 0.7 : 1,
-            }}
+              ...pressFeedback(pressed, busy),
+            })}
           >
             <Text style={{ color: "white", fontWeight: "800", fontSize: 13 }}>Approve</Text>
           </Pressable>
+          </View>
         </View>
       ) : null}
     </View>
@@ -229,6 +271,7 @@ function AppShell() {
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
 
   const [challenges, setChallenges] = useState<ActiveChallenge[]>([]);
+  const [challengeCodes, setChallengeCodes] = useState<Record<string, string>>({});
   const [challengeError, setChallengeError] = useState<string | null>(null);
   const [loadingChallenges, setLoadingChallenges] = useState(false);
 
@@ -355,10 +398,29 @@ function AppShell() {
   const respondToChallenge = async (challengeId: string, action: "approve" | "deny") => {
     try {
       setChallengeError(null);
+      const payload =
+        action === "approve"
+          ? {
+              verification_code: (challengeCodes[challengeId] || "").trim(),
+            }
+          : undefined;
+
+      if (action === "approve" && !payload?.verification_code) {
+        setChallengeError("Enter the 3-digit verification code before approving.");
+        return;
+      }
+
       const response = await fetch(`${BACKEND_URL}/active/challenges/${challengeId}/${action}`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: payload ? JSON.stringify(payload) : undefined,
       });
       if (!response.ok) throw new Error(`Backend ${response.status}`);
+      setChallengeCodes((current) => {
+        const next = { ...current };
+        delete next[challengeId];
+        return next;
+      });
       await syncChallenges();
     } catch (error) {
       setChallengeError(error instanceof Error ? error.message : "Request update failed");
@@ -452,16 +514,17 @@ function AppShell() {
 
           <Pressable
             onPress={() => setMenuOpen(true)}
-            style={{
+            style={({ pressed }) => ({
               borderWidth: 1,
               borderColor: COLORS.border,
               borderRadius: 12,
               backgroundColor: COLORS.cardSoft,
               paddingHorizontal: 12,
               paddingVertical: 9,
-            }}
+              ...pressFeedback(pressed),
+            })}
           >
-            <Text style={{ color: COLORS.text, fontSize: 13, fontWeight: "800" }}>Menu</Text>
+            <Text style={{ color: COLORS.text, fontSize: 18, fontWeight: "800", lineHeight: 20 }}>☰</Text>
           </Pressable>
         </View>
 
@@ -480,7 +543,7 @@ function AppShell() {
             <Pressable
               key={item}
               onPress={() => setMode(item)}
-              style={{
+              style={({ pressed }) => ({
                 flex: 1,
                 paddingVertical: 10,
                 borderRadius: 999,
@@ -488,10 +551,11 @@ function AppShell() {
                 backgroundColor: mode === item ? COLORS.primary : COLORS.cardSoft,
                 borderWidth: 1,
                 borderColor: mode === item ? COLORS.primary : COLORS.border,
-              }}
+                ...pressFeedback(pressed),
+              })}
             >
               <Text style={{ color: mode === item ? "#fff" : COLORS.text, fontSize: 13, fontWeight: "800" }}>
-                {item === "passive" ? "Passive" : "Active"}
+                {MODE_LABELS[item]}
               </Text>
             </Pressable>
           ))}
@@ -539,14 +603,15 @@ function AppShell() {
                         setCopiedAccountId(account.id);
                         setTimeout(() => setCopiedAccountId(null), 1200);
                       }}
-                      style={{
+                      style={({ pressed }) => ({
                         borderWidth: 1,
                         borderColor: COLORS.border,
                         borderRadius: 999,
                         backgroundColor: COLORS.cardSoft,
                         paddingHorizontal: 10,
                         paddingVertical: 6,
-                      }}
+                        ...pressFeedback(pressed),
+                      })}
                     >
                       <Text style={{ color: COLORS.text, fontSize: 12, fontWeight: "700" }}>
                         {copiedAccountId === account.id ? "Copied" : "Copy"}
@@ -593,15 +658,15 @@ function AppShell() {
 
             <Pressable
               onPress={() => void syncAccountCodes()}
-              style={{
+              style={({ pressed }) => ({
                 borderWidth: 1,
                 borderColor: COLORS.primary,
                 borderRadius: 999,
                 backgroundColor: COLORS.primarySoft,
                 paddingVertical: 11,
                 alignItems: "center",
-                opacity: loadingCodes ? 0.7 : 1,
-              }}
+                ...pressFeedback(pressed, loadingCodes),
+              })}
             >
               <Text style={{ color: COLORS.text, fontSize: 13, fontWeight: "800" }}>
                 {loadingCodes ? "Refreshing codes..." : "Refresh all codes"}
@@ -624,14 +689,15 @@ function AppShell() {
                 <Text style={{ color: COLORS.text, fontSize: 18, fontWeight: "800" }}>Sign-in requests</Text>
                 <Pressable
                   onPress={() => void syncChallenges()}
-                  style={{
+                  style={({ pressed }) => ({
                     borderWidth: 1,
                     borderColor: COLORS.border,
                     borderRadius: 999,
                     backgroundColor: COLORS.cardSoft,
                     paddingHorizontal: 10,
                     paddingVertical: 6,
-                  }}
+                    ...pressFeedback(pressed),
+                  })}
                 >
                   <Text style={{ color: COLORS.text, fontSize: 12, fontWeight: "700" }}>
                     {loadingChallenges ? "Syncing..." : "Refresh"}
@@ -655,6 +721,13 @@ function AppShell() {
                       key={challenge.id}
                       challenge={challenge}
                       busy={loadingChallenges}
+                      approveCode={challengeCodes[challenge.id] || ""}
+                      onApproveCodeChange={(value) =>
+                        setChallengeCodes((current) => ({
+                          ...current,
+                          [challenge.id]: value,
+                        }))
+                      }
                       onApprove={() => void respondToChallenge(challenge.id, "approve")}
                       onDeny={() => void respondToChallenge(challenge.id, "deny")}
                     />
@@ -683,6 +756,8 @@ function AppShell() {
                       key={challenge.id}
                       challenge={challenge}
                       busy={false}
+                      approveCode={challengeCodes[challenge.id] || ""}
+                      onApproveCodeChange={() => {}}
                       onApprove={() => {}}
                       onDeny={() => {}}
                     />
@@ -695,7 +770,15 @@ function AppShell() {
       </ScrollView>
 
       <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
-        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.62)", justifyContent: "flex-start", alignItems: "flex-end", paddingTop: Math.max(insets.top, 14) + 50, paddingHorizontal: 14 }}>
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: "rgba(0,0,0,0.62)",
+            justifyContent: "center",
+            alignItems: "center",
+            paddingHorizontal: 14,
+          }}
+        >
           <View
             style={{
               width: "92%",
@@ -712,7 +795,13 @@ function AppShell() {
 
             <Pressable
               onPress={() => void openScanner()}
-              style={{ borderRadius: 999, backgroundColor: COLORS.primary, paddingVertical: 10, alignItems: "center" }}
+              style={({ pressed }) => ({
+                borderRadius: 999,
+                backgroundColor: COLORS.primary,
+                paddingVertical: 10,
+                alignItems: "center",
+                ...pressFeedback(pressed),
+              })}
             >
               <Text style={{ color: "white", fontWeight: "800", fontSize: 13 }}>Scan QR setup code</Text>
             </Pressable>
@@ -729,7 +818,15 @@ function AppShell() {
 
             <Pressable
               onPress={() => applySetupUri(pasteUri)}
-              style={{ borderRadius: 999, borderWidth: 1, borderColor: COLORS.border, backgroundColor: COLORS.cardSoft, paddingVertical: 10, alignItems: "center" }}
+              style={({ pressed }) => ({
+                borderRadius: 999,
+                borderWidth: 1,
+                borderColor: COLORS.border,
+                backgroundColor: COLORS.cardSoft,
+                paddingVertical: 10,
+                alignItems: "center",
+                ...pressFeedback(pressed),
+              })}
             >
               <Text style={{ color: COLORS.text, fontWeight: "800", fontSize: 13 }}>Import from URI</Text>
             </Pressable>
@@ -761,7 +858,15 @@ function AppShell() {
                     </View>
                     <Pressable
                       onPress={() => setAccounts((current) => current.filter((item) => item.id !== account.id))}
-                      style={{ borderRadius: 999, borderWidth: 1, borderColor: COLORS.error, backgroundColor: "rgba(220,38,38,0.12)", paddingHorizontal: 10, paddingVertical: 6 }}
+                      style={({ pressed }) => ({
+                        borderRadius: 999,
+                        borderWidth: 1,
+                        borderColor: COLORS.error,
+                        backgroundColor: "rgba(220,38,38,0.12)",
+                        paddingHorizontal: 10,
+                        paddingVertical: 6,
+                        ...pressFeedback(pressed),
+                      })}
                     >
                       <Text style={{ color: COLORS.text, fontSize: 11, fontWeight: "800" }}>Remove</Text>
                     </Pressable>
@@ -772,7 +877,15 @@ function AppShell() {
 
             <Pressable
               onPress={() => setMenuOpen(false)}
-              style={{ borderRadius: 999, borderWidth: 1, borderColor: COLORS.border, backgroundColor: COLORS.cardSoft, paddingVertical: 10, alignItems: "center" }}
+              style={({ pressed }) => ({
+                borderRadius: 999,
+                borderWidth: 1,
+                borderColor: COLORS.border,
+                backgroundColor: COLORS.cardSoft,
+                paddingVertical: 10,
+                alignItems: "center",
+                ...pressFeedback(pressed),
+              })}
             >
               <Text style={{ color: COLORS.text, fontWeight: "800", fontSize: 13 }}>Close</Text>
             </Pressable>
@@ -802,7 +915,15 @@ function AppShell() {
 
           <Pressable
             onPress={() => setShowScanner(false)}
-            style={{ borderRadius: 999, borderWidth: 1, borderColor: COLORS.border, backgroundColor: COLORS.cardSoft, paddingVertical: 11, alignItems: "center" }}
+            style={({ pressed }) => ({
+              borderRadius: 999,
+              borderWidth: 1,
+              borderColor: COLORS.border,
+              backgroundColor: COLORS.cardSoft,
+              paddingVertical: 11,
+              alignItems: "center",
+              ...pressFeedback(pressed),
+            })}
           >
             <Text style={{ color: COLORS.text, fontWeight: "800", fontSize: 13 }}>Cancel</Text>
           </Pressable>
