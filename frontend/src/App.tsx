@@ -8,10 +8,8 @@ import {
   Chip,
   Container,
   Divider,
-  Grid,
   LinearProgress,
   Paper,
-  Stack,
   TextField,
   Typography,
 } from "@mui/material";
@@ -23,7 +21,6 @@ import SettingsRoundedIcon from "@mui/icons-material/SettingsRounded";
 import VisibilityRoundedIcon from "@mui/icons-material/VisibilityRounded";
 
 const STEP_SECONDS = 60;
-const HALF_LIFE_SECONDS = 30;
 const DEFAULT_BACKEND_URL = "http://localhost:8000";
 const DEFAULT_SECRET = "JBSWY3DPEHPK3PXP";
 
@@ -102,6 +99,68 @@ function useBackendHealth(backendUrl: string) {
   return { status, lastChecked };
 }
 
+function ProgressRail({
+  label,
+  caption,
+  value,
+  tone = "primary",
+}: {
+  label: string;
+  caption: string;
+  value: number;
+  tone?: "primary" | "success" | "error" | "neutral";
+}) {
+  const fillColor =
+    tone === "success" ? "#16A34A" : tone === "error" ? "#DC2626" : tone === "neutral" ? "#64748B" : "#F97316";
+
+  return (
+    <Box sx={{ display: "grid", gap: 0.75 }}>
+      <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
+        <Typography variant="body2" sx={{ color: "text.primary", fontWeight: 700 }}>
+          {label}
+        </Typography>
+        <Typography variant="body2" sx={{ color: "text.secondary" }}>
+          {caption}
+        </Typography>
+      </Box>
+      <Box
+        sx={{
+          position: "relative",
+          height: 14,
+          borderRadius: 999,
+          backgroundColor: "#EEF2F7",
+          border: "1px solid #E2E8F0",
+          overflow: "hidden",
+        }}
+      >
+        <Box
+          sx={{
+            width: `${Math.max(8, Math.min(100, value * 100))}%`,
+            height: "100%",
+            borderRadius: 999,
+            backgroundColor: fillColor,
+          }}
+        />
+        <Box
+          sx={{
+            position: "absolute",
+            inset: 0,
+            px: 1,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            opacity: 0.28,
+          }}
+        >
+          {Array.from({ length: 5 }).map((_, index) => (
+            <Box key={index} sx={{ width: 1, height: 8, backgroundColor: "text.primary" }} />
+          ))}
+        </Box>
+      </Box>
+    </Box>
+  );
+}
+
 export default function App() {
   const { secondsLeft, progress, windowIndex } = useRefreshWindow();
   const [backendUrl, setBackendUrl] = useState(DEFAULT_BACKEND_URL);
@@ -109,9 +168,11 @@ export default function App() {
   const [previewWords, setPreviewWords] = useState<string[]>(["PLUTO", "JAZZ", "ECHO"]);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewUpdatedAt, setPreviewUpdatedAt] = useState<string>("");
+  const [loadingPreview, setLoadingPreview] = useState(false);
   const { status, lastChecked } = useBackendHealth(backendUrl);
 
   const syncPreview = async () => {
+    setLoadingPreview(true);
     try {
       setPreviewError(null);
       const response = await fetch(`${backendUrl.replace(/\/$/, "")}/preview/words`, {
@@ -133,6 +194,8 @@ export default function App() {
       setPreviewUpdatedAt(new Date().toLocaleTimeString());
     } catch (error) {
       setPreviewError(error instanceof Error ? error.message : "Failed to sync preview");
+    } finally {
+      setLoadingPreview(false);
     }
   };
 
@@ -142,26 +205,26 @@ export default function App() {
   }, [backendUrl, secretKey, windowIndex]);
 
   const backendScore = status === "online" ? 100 : status === "checking" ? 50 : 12;
-  const backendLabel = status === "online" ? "Connected" : status === "checking" ? "Checking" : "Offline";
-  const countdownLabel = `${secondsLeft}s until refresh`;
+  const statusLabel = status === "online" ? "Connected" : status === "checking" ? "Checking" : "Offline";
+  const countdownLabel = `${secondsLeft}s to refresh`;
 
   return (
-    <Box sx={{ minHeight: "100vh", background: "linear-gradient(180deg, #f7f4ee 0%, #f4f6f8 100%)" }}>
+    <Box sx={{ minHeight: "100vh", bgcolor: "background.default", color: "text.primary" }}>
       <Box
         component="header"
         sx={{
-          borderBottom: "1px solid",
-          borderColor: "divider",
-          backgroundColor: "rgba(255,255,255,0.72)",
-          backdropFilter: "blur(16px)",
           position: "sticky",
           top: 0,
           zIndex: 20,
+          borderBottom: "1px solid",
+          borderColor: "divider",
+          backgroundColor: "rgba(247, 244, 238, 0.84)",
+          backdropFilter: "blur(16px)",
         }}
       >
         <Container maxWidth="xl" sx={{ py: 2 }}>
-          <Stack direction="row" alignItems="center" justifyContent="space-between" gap={2}>
-            <Stack direction="row" alignItems="center" gap={1.5}>
+          <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2, flexWrap: "wrap" }}>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
               <Box
                 sx={{
                   width: 40,
@@ -169,287 +232,232 @@ export default function App() {
                   borderRadius: 2,
                   display: "grid",
                   placeItems: "center",
-                  backgroundColor: "primary.main",
+                  bgcolor: "primary.main",
                   color: "primary.contrastText",
                 }}
               >
                 <SecurityRoundedIcon fontSize="small" />
               </Box>
               <Box>
-                <Typography variant="subtitle1" fontWeight={800} lineHeight={1}>
+                <Typography variant="subtitle1" sx={{ fontWeight: 800, lineHeight: 1 }}>
                   Xenon Auth
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
                   Three-word authentication platform
                 </Typography>
               </Box>
-            </Stack>
+            </Box>
 
-            <Stack direction="row" spacing={1} sx={{ display: { xs: "none", md: "flex" } }}>
+            <Box sx={{ display: { xs: "none", md: "flex" }, gap: 1 }}>
               <Chip label="Overview" variant="outlined" component="a" href="#overview" clickable />
               <Chip label="How to use" variant="outlined" component="a" href="#how-it-works" clickable />
               <Chip label="Status" variant="outlined" component="a" href="#status" clickable />
               <Chip label="Testing" variant="outlined" component="a" href="#testing" clickable />
-            </Stack>
-          </Stack>
+            </Box>
+          </Box>
         </Container>
       </Box>
 
       <Container maxWidth="xl" sx={{ py: { xs: 3, md: 6 } }}>
-        <Grid container spacing={3} id="overview">
-          <Grid item xs={12} md={7}>
-            <Paper sx={{ p: { xs: 3, md: 5 }, height: "100%", background: "linear-gradient(180deg, #ffffff 0%, #fbfbfb 100%)" }}>
-              <Stack spacing={3}>
-                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                  <Chip icon={<PlayArrowRoundedIcon />} label="Product page" color="primary" variant="filled" />
-                  <Chip label="Live status" variant="outlined" />
-                  <Chip label="Testing console" variant="outlined" />
-                </Stack>
+        <Box sx={{ display: "grid", gap: 3, gridTemplateColumns: { xs: "1fr", md: "1.4fr 0.95fr" } }} id="overview">
+          <Paper sx={{ p: { xs: 3, md: 5 }, background: "linear-gradient(180deg, #ffffff 0%, #fbfbfb 100%)" }}>
+            <Box sx={{ display: "grid", gap: 3 }}>
+              <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
+                <Chip icon={<PlayArrowRoundedIcon />} label="Product page" color="primary" />
+                <Chip label="Live status" variant="outlined" />
+                <Chip label="Testing console" variant="outlined" />
+              </Box>
 
+              <Box>
+                <Typography component="h1" variant="h1" sx={{ fontSize: { xs: 38, md: 60 }, lineHeight: 0.95, maxWidth: 12, mb: 2 }}>
+                  Three-word 2FA for products that want better sign-in.
+                </Typography>
+                <Typography variant="body1" color="text.secondary" sx={{ maxWidth: 760, fontSize: { xs: 16, md: 18 }, lineHeight: 1.8 }}>
+                  Xenon Auth turns TOTP into a deterministic 3-word array, supports encrypted personal decks, and keeps status
+                  and testing in the same place for easier rollout and support.
+                </Typography>
+              </Box>
+
+              <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
+                <Button variant="contained" href="#testing">
+                  Open testing console
+                </Button>
+                <Button variant="outlined" href="#how-it-works">
+                  How it works
+                </Button>
+              </Box>
+
+              <Box sx={{ display: "grid", gap: 2, gridTemplateColumns: { xs: "1fr", sm: "repeat(3, minmax(0, 1fr))" } }}>
+                {PRODUCT_POINTS.map((point) => (
+                  <Card key={point} variant="outlined">
+                    <CardContent>
+                      <Typography variant="body2" color="text.secondary">
+                        {point}
+                      </Typography>
+                    </CardContent>
+                  </Card>
+                ))}
+              </Box>
+            </Box>
+          </Paper>
+
+          <Paper id="status" sx={{ p: 3 }}>
+            <Box sx={{ display: "grid", gap: 2.5 }}>
+              <Box sx={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 2 }}>
                 <Box>
-                  <Typography variant="h1" sx={{ fontSize: { xs: 38, md: 60 }, lineHeight: 0.95, maxWidth: 11.5, mb: 2 }}>
-                    Three-word 2FA for products that want better sign-in.
+                  <Typography variant="overline" color="text.secondary">
+                    Backend status
                   </Typography>
-                  <Typography variant="body1" color="text.secondary" sx={{ maxWidth: 760, fontSize: { xs: 16, md: 18 }, lineHeight: 1.8 }}>
-                    Xenon Auth turns TOTP into a deterministic 3-word array, supports encrypted personal decks, and
-                    keeps status and testing in the same place for easier rollout and support.
+                  <Typography variant="h4" sx={{ mt: 0.5, fontSize: { xs: 24, md: 28 }, fontWeight: 700 }}>
+                    {statusLabel}
+                  </Typography>
+                </Box>
+                <Chip
+                  icon={status === "online" ? <CheckCircleRoundedIcon /> : <SettingsRoundedIcon />}
+                  label={statusLabel}
+                  color={status === "offline" ? "error" : "primary"}
+                  variant={status === "checking" ? "outlined" : "filled"}
+                />
+              </Box>
+
+              <ProgressRail
+                label="Backend health"
+                caption={status === "online" ? "API reachable" : status === "checking" ? "Checking now" : "No response"}
+                value={backendScore / 100}
+                tone={status === "online" ? "success" : status === "offline" ? "error" : "neutral"}
+              />
+
+              <Divider />
+
+              <Box sx={{ display: "grid", gap: 0.5 }}>
+                <Typography variant="body2" color="text.secondary" sx={{ letterSpacing: 1.2, textTransform: "uppercase" }}>
+                  Endpoint
+                </Typography>
+                <Typography variant="body1" sx={{ fontWeight: 700, wordBreak: "break-word" }}>
+                  {backendUrl}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Last checked: {lastChecked || "pending"}
+                </Typography>
+              </Box>
+
+              <Alert icon={<VisibilityRoundedIcon />} severity={status === "offline" ? "warning" : "success"}>
+                This panel confirms whether the app can reach the backend before you start testing codes.
+              </Alert>
+            </Box>
+          </Paper>
+        </Box>
+
+        <Box sx={{ display: "grid", gap: 3, gridTemplateColumns: { xs: "1fr", md: "0.9fr 1.1fr" }, mt: 3 }} id="how-it-works">
+          <Paper sx={{ p: 3 }}>
+            <Typography variant="overline" color="text.secondary">
+              How to use
+            </Typography>
+            <Typography variant="h4" sx={{ mt: 0.5, mb: 2, fontSize: { xs: 24, md: 30 }, fontWeight: 700 }}>
+              A simple rollout path.
+            </Typography>
+            <Box sx={{ display: "grid", gap: 1.25 }}>
+              {HOW_IT_WORKS.map((step, index) => (
+                <Paper key={step.title} variant="outlined" sx={{ p: 2 }}>
+                  <Box sx={{ display: "flex", alignItems: "flex-start", gap: 2 }}>
+                    <Chip label={`0${index + 1}`} color="primary" sx={{ fontWeight: 800 }} />
+                    <Box>
+                      <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                        {step.title}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, lineHeight: 1.7 }}>
+                        {step.body}
+                      </Typography>
+                    </Box>
+                  </Box>
+                </Paper>
+              ))}
+            </Box>
+          </Paper>
+
+          <Paper sx={{ p: 3 }} id="testing">
+            <Box sx={{ display: "grid", gap: 3 }}>
+              <Box>
+                <Typography variant="overline" color="text.secondary">
+                  Testing console
+                </Typography>
+                <Typography variant="h4" sx={{ mt: 0.5, fontSize: { xs: 24, md: 30 }, fontWeight: 700 }}>
+                  Preview live codes and timing.
+                </Typography>
+              </Box>
+
+              <Box sx={{ display: "grid", gap: 2, gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" } }}>
+                <TextField
+                  fullWidth
+                  label="Backend URL"
+                  value={backendUrl}
+                  onChange={(event) => setBackendUrl(event.target.value)}
+                  helperText="Used for /health and /preview/words"
+                />
+                <TextField
+                  fullWidth
+                  label="Base32 secret"
+                  value={secretKey}
+                  onChange={(event) => setSecretKey(event.target.value.toUpperCase())}
+                  helperText="This stays in the browser for local testing"
+                />
+              </Box>
+
+              <Box sx={{ display: "flex", alignItems: "center", gap: 2, flexWrap: "wrap" }}>
+                <Button variant="contained" startIcon={<PlayArrowRoundedIcon />} onClick={() => void syncPreview()}>
+                  {loadingPreview ? "Syncing..." : "Sync preview"}
+                </Button>
+                <Box sx={{ flex: 1, minWidth: 220 }}>
+                  <ProgressRail label="Refresh cycle" caption={countdownLabel} value={progress} tone="primary" />
+                </Box>
+              </Box>
+
+              {previewError ? (
+                <Alert icon={<ErrorOutlineRoundedIcon />} severity="error">
+                  {previewError}
+                </Alert>
+              ) : null}
+
+              <Box>
+                <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2, mb: 1.5 }}>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                    Current three-word token
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Updated {previewUpdatedAt || "not yet"}
                   </Typography>
                 </Box>
 
-                <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
-                  <Button variant="contained" href="#testing">
-                    Open testing console
-                  </Button>
-                  <Button variant="outlined" href="#how-it-works">
-                    How it works
-                  </Button>
-                </Stack>
-
-                <Grid container spacing={2}>
-                  {PRODUCT_POINTS.map((point) => (
-                    <Grid key={point} item xs={12} sm={4}>
-                      <Card variant="outlined">
-                        <CardContent>
-                          <Typography variant="body2" color="text.secondary">
-                            {point}
-                          </Typography>
-                        </CardContent>
-                      </Card>
-                    </Grid>
-                  ))}
-                </Grid>
-              </Stack>
-            </Paper>
-          </Grid>
-
-          <Grid item xs={12} md={5}>
-            <Stack spacing={3} sx={{ height: "100%" }}>
-              <Card id="status">
-                <CardContent>
-                  <Stack spacing={2.5}>
-                    <Stack direction="row" alignItems="flex-start" justifyContent="space-between" gap={2}>
-                      <Box>
-                        <Typography variant="overline" color="text.secondary">
-                          Backend status
-                        </Typography>
-                        <Typography variant="h4" sx={{ mt: 0.5, fontSize: { xs: 24, md: 28 } }}>
-                          {backendLabel}
-                        </Typography>
-                      </Box>
-                      <Chip
-                        icon={status === "online" ? <CheckCircleRoundedIcon /> : <SettingsRoundedIcon />}
-                        label={backendLabel}
-                        color={status === "offline" ? "error" : "primary"}
-                        variant={status === "checking" ? "outlined" : "filled"}
-                      />
-                    </Stack>
-
-                    <Box>
-                      <Stack direction="row" justifyContent="space-between" alignItems="center" mb={1}>
-                        <Typography variant="body2" color="text.secondary">
-                          API health
-                        </Typography>
-                        <Typography variant="body2" fontWeight={700}>
-                          {backendScore}%
-                        </Typography>
-                      </Stack>
-                      <LinearProgress variant="determinate" value={backendScore} sx={{ height: 12 }} />
+                <Box sx={{ display: "flex", gap: 1.5, flexWrap: "wrap" }}>
+                  {previewWords.map((word) => (
+                    <Box
+                      key={word}
+                      sx={{
+                        flex: "1 1 120px",
+                        py: 2,
+                        px: 2,
+                        textAlign: "center",
+                        fontWeight: 800,
+                        letterSpacing: "0.18em",
+                        fontSize: 18,
+                        borderRadius: 4,
+                        bgcolor: "#fffdfa",
+                        border: "1px solid",
+                        borderColor: "divider",
+                      }}
+                    >
+                      {word}
                     </Box>
-
-                    <Divider />
-
-                    <Stack spacing={1.2}>
-                      <Typography variant="body2" color="text.secondary">
-                        Endpoint
-                      </Typography>
-                      <Typography variant="body1" fontWeight={700} sx={{ wordBreak: "break-word" }}>
-                        {backendUrl}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        Last checked: {lastChecked || "pending"}
-                      </Typography>
-                    </Stack>
-                  </Stack>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardContent>
-                  <Stack spacing={2.5}>
-                    <Typography variant="h6">What to test right now</Typography>
-                    <Stack spacing={1.5}>
-                      <Stack direction="row" spacing={1.5} alignItems="center">
-                        <VisibilityRoundedIcon color="primary" fontSize="small" />
-                        <Typography variant="body2">Preview the current three-word code.</Typography>
-                      </Stack>
-                      <Stack direction="row" spacing={1.5} alignItems="center">
-                        <VisibilityRoundedIcon color="primary" fontSize="small" />
-                        <Typography variant="body2">Check the backend from both web and phone.</Typography>
-                      </Stack>
-                      <Stack direction="row" spacing={1.5} alignItems="center">
-                        <VisibilityRoundedIcon color="primary" fontSize="small" />
-                        <Typography variant="body2">Use the timer bar to confirm 60-second refresh.</Typography>
-                      </Stack>
-                    </Stack>
-                  </Stack>
-                </CardContent>
-              </Card>
-            </Stack>
-          </Grid>
-        </Grid>
-
-        <Grid container spacing={3} sx={{ mt: { xs: 0, md: 1 } }} id="how-it-works">
-          <Grid item xs={12} md={5}>
-            <Card sx={{ height: "100%" }}>
-              <CardContent>
-                <Typography variant="overline" color="text.secondary">
-                  How to use
-                </Typography>
-                <Typography variant="h4" sx={{ mt: 0.5, mb: 2 }}>
-                  A simple rollout path.
-                </Typography>
-                <Stack spacing={2}>
-                  {HOW_IT_WORKS.map((step, index) => (
-                    <Paper key={step.title} variant="outlined" sx={{ p: 2 }}>
-                      <Stack direction="row" spacing={2} alignItems="flex-start">
-                        <Chip label={`0${index + 1}`} color="primary" sx={{ fontWeight: 800 }} />
-                        <Box>
-                          <Typography variant="subtitle1" fontWeight={700}>
-                            {step.title}
-                          </Typography>
-                          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, lineHeight: 1.7 }}>
-                            {step.body}
-                          </Typography>
-                        </Box>
-                      </Stack>
-                    </Paper>
                   ))}
-                </Stack>
-              </CardContent>
-            </Card>
-          </Grid>
+                </Box>
+              </Box>
 
-          <Grid item xs={12} md={7} id="testing">
-            <Card sx={{ height: "100%" }}>
-              <CardContent>
-                <Stack spacing={3}>
-                  <Box>
-                    <Typography variant="overline" color="text.secondary">
-                      Testing console
-                    </Typography>
-                    <Typography variant="h4" sx={{ mt: 0.5 }}>
-                      Live backend preview
-                    </Typography>
-                  </Box>
-
-                  <Grid container spacing={2}>
-                    <Grid item xs={12} sm={6}>
-                      <TextField
-                        fullWidth
-                        label="Backend URL"
-                        value={backendUrl}
-                        onChange={(event) => setBackendUrl(event.target.value)}
-                        helperText="Used for /health and /preview/words"
-                      />
-                    </Grid>
-                    <Grid item xs={12} sm={6}>
-                      <TextField
-                        fullWidth
-                        label="Base32 secret"
-                        value={secretKey}
-                        onChange={(event) => setSecretKey(event.target.value.toUpperCase())}
-                        helperText="This is only used for local preview and testing"
-                      />
-                    </Grid>
-                  </Grid>
-
-                  <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems={{ xs: "stretch", sm: "center" }}>
-                    <Button variant="contained" startIcon={<PlayArrowRoundedIcon />} onClick={() => void syncPreview()}>
-                      Sync preview
-                    </Button>
-                    <Box sx={{ flex: 1 }}>
-                      <Stack direction="row" justifyContent="space-between" sx={{ mb: 1 }}>
-                        <Typography variant="body2" color="text.secondary">
-                          Refresh window
-                        </Typography>
-                        <Typography variant="body2" fontWeight={700}>
-                          {countdownLabel}
-                        </Typography>
-                      </Stack>
-                      <LinearProgress
-                        variant="determinate"
-                        value={progress * 100}
-                        sx={{ height: 14, backgroundColor: "rgba(15,23,42,0.08)" }}
-                      />
-                    </Box>
-                  </Stack>
-
-                  {previewError ? (
-                    <Alert icon={<ErrorOutlineRoundedIcon />} severity="error">
-                      {previewError}
-                    </Alert>
-                  ) : null}
-
-                  <Box>
-                    <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1.5 }}>
-                      <Typography variant="subtitle1" fontWeight={700}>
-                        Current three-word token
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        Updated {previewUpdatedAt || "not yet"}
-                      </Typography>
-                    </Stack>
-
-                    <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
-                      {previewWords.map((word) => (
-                        <Paper
-                          key={word}
-                          variant="outlined"
-                          sx={{
-                            flex: 1,
-                            py: 2,
-                            px: 2,
-                            textAlign: "center",
-                            fontWeight: 800,
-                            letterSpacing: "0.18em",
-                            fontSize: 18,
-                            backgroundColor: "#fffdfa",
-                          }}
-                        >
-                          {word}
-                        </Paper>
-                      ))}
-                    </Stack>
-                  </Box>
-
-                  <Alert icon={<CheckCircleRoundedIcon />} severity={status === "offline" ? "warning" : "success"}>
-                    The page is designed for live testing, status checks, and rollout support.
-                  </Alert>
-                </Stack>
-              </CardContent>
-            </Card>
-          </Grid>
-        </Grid>
+              <Alert icon={<CheckCircleRoundedIcon />} severity={status === "offline" ? "warning" : "success"}>
+                The page is designed for live testing, status checks, and rollout support.
+              </Alert>
+            </Box>
+          </Paper>
+        </Box>
       </Container>
     </Box>
   );
