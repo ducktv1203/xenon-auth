@@ -130,7 +130,7 @@ export default function App() {
   const [portalLoading, setPortalLoading] = useState(false);
   const [demoPortals, setDemoPortals] = useState<DemoPortal[]>([]);
   const [expandedPortalIds, setExpandedPortalIds] = useState<string[]>([]);
-  const [portalPhraseParts, setPortalPhraseParts] = useState<Record<string, [string, string, string]>>({});
+  const [portalCodeParts, setPortalCodeParts] = useState<Record<string, [string, string, string]>>({});
   const [portalVerifyResults, setPortalVerifyResults] = useState<Record<string, { ok: boolean; message: string }>>({});
   const [verifyingPortalId, setVerifyingPortalId] = useState<string | null>(null);
 
@@ -159,9 +159,9 @@ export default function App() {
   };
 
   const sanitizeWord = (value: string) => value.toUpperCase().replace(/[^A-Z0-9]/g, "");
-  const setPortalPhrasePart = (portalId: string, index: 0 | 1 | 2, value: string) => {
+  const setPortalCodePart = (portalId: string, index: 0 | 1 | 2, value: string) => {
     const cleaned = sanitizeWord(value);
-    setPortalPhraseParts((current) => {
+    setPortalCodeParts((current) => {
       const existing = current[portalId] || ["", "", ""];
       const next: [string, string, string] = [...existing] as [string, string, string];
       next[index] = cleaned;
@@ -169,7 +169,7 @@ export default function App() {
     });
   };
 
-  const verifyPortalPhrase = async (portal: DemoPortal) => {
+  const verifyPortalCode = async (portal: DemoPortal) => {
     setVerifyingPortalId(portal.id);
     try {
       const response = await fetch(`${baseUrl}/preview/words`, {
@@ -185,7 +185,7 @@ export default function App() {
       }
 
       const expected = payload.words.map((word) => String(word).toUpperCase());
-      const actual = (portalPhraseParts[portal.id] || ["", "", ""])
+      const actual = (portalCodeParts[portal.id] || ["", "", ""])
         .map((part) => sanitizeWord(part))
         .filter(Boolean);
 
@@ -269,7 +269,7 @@ export default function App() {
   const deleteDemoPortal = (portalId: string) => {
     setDemoPortals((current) => current.filter((portal) => portal.id !== portalId));
     setExpandedPortalIds((current) => current.filter((id) => id !== portalId));
-    setPortalPhraseParts((current) => {
+    setPortalCodeParts((current) => {
       const next = { ...current };
       delete next[portalId];
       return next;
@@ -538,7 +538,7 @@ export default function App() {
                 {demoPortals.length > 0 ? (
                   <Stack spacing={1.5}>
                     {demoPortals.map((portal) => {
-                      const parts = portalPhraseParts[portal.id] || ["", "", ""];
+                      const parts = portalCodeParts[portal.id] || ["", "", ""];
                       const verifyResult = portalVerifyResults[portal.id];
                       return (
                         <Paper key={portal.id} sx={{ p: 1.5, border: "1px solid #2C2C2C", bgcolor: "#111" }}>
@@ -623,16 +623,16 @@ export default function App() {
                             <Box sx={{ display: "grid", gap: 1.2, gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
                               {([0, 1, 2] as const).map((index) => (
                                 <TextField
-                                  key={`${portal.id}-phrase-${index}`}
+                                  key={`${portal.id}-code-${index}`}
                                   label={`Code word ${index + 1}`}
                                   placeholder="WORD"
                                   value={parts[index]}
                                   disabled={!portal.connected}
-                                  onChange={(event) => setPortalPhrasePart(portal.id, index, event.target.value)}
+                                  onChange={(event) => setPortalCodePart(portal.id, index, event.target.value)}
                                   onKeyDown={(event) => {
                                     if (event.key === "Enter" && portal.connected) {
                                       event.preventDefault();
-                                      void verifyPortalPhrase(portal);
+                                      void verifyPortalCode(portal);
                                     }
                                   }}
                                   fullWidth
@@ -640,15 +640,19 @@ export default function App() {
                               ))}
                             </Box>
                             {verifyResult ? (
-                              <Typography
-                                variant="caption"
+                              <Box
                                 sx={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: 0.7,
                                   color: verifyResult.ok ? "success.main" : "warning.main",
-                                  fontWeight: 700,
                                 }}
                               >
-                                {verifyResult.message}
-                              </Typography>
+                                {verifyResult.ok ? <CheckCircleOutlineRoundedIcon sx={{ fontSize: 14 }} /> : null}
+                                <Typography variant="caption" sx={{ color: "inherit", fontWeight: 700 }}>
+                                  {verifyResult.message}
+                                </Typography>
+                              </Box>
                             ) : null}
                             {verifyingPortalId === portal.id ? (
                               <Box sx={{ display: "flex", gap: 1, alignItems: "center" }}>

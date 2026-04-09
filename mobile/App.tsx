@@ -39,10 +39,17 @@ type AccountItem = {
   issuer: string;
   account: string;
   secret: string;
-  words: string[];
+  codes: string[];
   lastUpdated: string;
   error: string | null;
 };
+
+function normalizeCodes(value: unknown): string[] {
+  if (Array.isArray(value) && value.length === 3) {
+    return value.map((item) => String(item).toUpperCase());
+  }
+  return ["----", "----", "----"];
+}
 
 const COLORS = {
   bg: "#0D0D0D",
@@ -324,7 +331,7 @@ function AppShell() {
         issuer: parsed.issuer,
         account: parsed.account,
         secret: parsed.secret,
-        words: existing?.words ?? ["----", "----", "----"],
+        codes: normalizeCodes(existing?.codes),
         lastUpdated: existing?.lastUpdated ?? "",
         error: null,
       };
@@ -360,7 +367,7 @@ function AppShell() {
     syncCodesInFlightRef.current = true;
     setLoadingCodes(true);
     try {
-      const fetchWordsForTime = async (secret: string, unixTime?: number): Promise<string[]> => {
+      const fetchCodesForTime = async (secret: string, unixTime?: number): Promise<string[]> => {
         const response = await fetch(`${BACKEND_URL}/preview/words`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -380,28 +387,29 @@ function AppShell() {
 
       const updates = await Promise.all(
         accounts.map(async (account) => {
+          const existingCodes = normalizeCodes(account.codes);
           try {
-            let words = await fetchWordsForTime(account.secret);
+            let codes = await fetchCodesForTime(account.secret);
 
             if (
               options?.resetTimer &&
-              words.join("|") === account.words.join("|")
+              codes.join("|") === existingCodes.join("|")
             ) {
               const nextWindowTime =
                 Math.floor(Date.now() / 1000) + STEP_SECONDS * manualRefreshSequenceRef.current;
-              words = await fetchWordsForTime(account.secret, nextWindowTime);
+              codes = await fetchCodesForTime(account.secret, nextWindowTime);
             }
 
             return {
               id: account.id,
-              words,
+              codes,
               lastUpdated: new Date().toLocaleTimeString(),
               error: null,
             };
           } catch (error) {
             return {
               id: account.id,
-              words: account.words,
+              codes: existingCodes,
               lastUpdated: account.lastUpdated,
               error: error instanceof Error ? error.message : "Sync failed",
             };
@@ -415,7 +423,7 @@ function AppShell() {
           return patch
             ? {
                 ...account,
-                words: patch.words,
+                codes: normalizeCodes(patch.codes),
                 lastUpdated: patch.lastUpdated,
                 error: patch.error,
               }
@@ -530,12 +538,12 @@ function AppShell() {
       const stored = await AsyncStorage.getItem(STORAGE_KEY);
       if (!stored) return;
       try {
-        const parsed = JSON.parse(stored) as AccountItem[];
+        const parsed = JSON.parse(stored) as Array<AccountItem & { words?: unknown; codes?: unknown }>;
         if (Array.isArray(parsed)) {
           setAccounts(
             parsed.map((account) => ({
               ...account,
-              words: Array.isArray(account.words) && account.words.length === 3 ? account.words : ["----", "----", "----"],
+              codes: normalizeCodes(account.codes ?? account.words),
               error: null,
             })),
           );
@@ -617,11 +625,6 @@ function AppShell() {
 
         <View
           style={{
-            backgroundColor: COLORS.card,
-            borderWidth: 1,
-            borderColor: COLORS.border,
-            borderRadius: 18,
-            padding: 8,
             flexDirection: "row",
             gap: 8,
           }}
@@ -707,9 +710,9 @@ function AppShell() {
                   </View>
 
                   <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
-                    {account.words.map((word, index) => (
+                    {normalizeCodes(account.codes).map((code, index) => (
                       <View
-                        key={`${account.id}-${index}-${word}`}
+                        key={`${account.id}-${index}-${code}`}
                         style={{
                           flexGrow: 1,
                           minWidth: 80,
@@ -721,7 +724,7 @@ function AppShell() {
                           backgroundColor: COLORS.cardSoft,
                         }}
                       >
-                        <Text style={{ color: COLORS.text, fontWeight: "800", letterSpacing: 1.6 }}>{word}</Text>
+                        <Text style={{ color: COLORS.text, fontWeight: "800", letterSpacing: 1.6 }}>{code}</Text>
                       </View>
                     ))}
                   </View>
