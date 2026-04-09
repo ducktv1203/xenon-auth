@@ -30,6 +30,7 @@ function base64ToBytes(base64: string): Uint8Array {
 }
 
 async function deriveAesKey(secretKey: string, salt: Uint8Array): Promise<CryptoKey> {
+  const saltBytes = new Uint8Array(salt);
   const keyMaterial = await crypto.subtle.importKey(
     "raw",
     textEncoder.encode(secretKey),
@@ -42,7 +43,7 @@ async function deriveAesKey(secretKey: string, salt: Uint8Array): Promise<Crypto
     {
       name: "PBKDF2",
       hash: "SHA-256",
-      salt,
+      salt: saltBytes as unknown as BufferSource,
       iterations: PBKDF2_ITERATIONS,
     },
     keyMaterial,
@@ -72,7 +73,7 @@ export async function encryptPersonalDeck(
   const ciphertext = await crypto.subtle.encrypt(
     {
       name: "AES-GCM",
-      iv,
+      iv: iv as unknown as BufferSource,
     },
     aesKey,
     textEncoder.encode(serialized),
@@ -101,10 +102,10 @@ export async function decryptPersonalDeck(
   const plaintext = await crypto.subtle.decrypt(
     {
       name: "AES-GCM",
-      iv,
+      iv: iv as unknown as BufferSource,
     },
     aesKey,
-    ciphertext,
+    ciphertext as unknown as BufferSource,
   );
 
   const parsed = JSON.parse(textDecoder.decode(plaintext));
