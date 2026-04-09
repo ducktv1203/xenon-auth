@@ -15,7 +15,7 @@ const STEP_SECONDS = 60;
 const DEFAULT_SECRET = "JBSWY3DPEHPK3PXP";
 const DEFAULT_BACKEND_URL = "http://localhost:8000";
 
-type MobileTab = "auth" | "testing" | "guide";
+type MobileTab = "home" | "requests" | "settings";
 type ChallengeStatus = "pending" | "approved" | "denied" | "expired";
 
 type ActiveChallenge = {
@@ -41,7 +41,6 @@ const COLORS = {
   primary: "#FF5F1F",
   primarySoft: "rgba(255,95,31,0.12)",
   success: "#16A34A",
-  warning: "#F59E0B",
   error: "#DC2626",
 };
 
@@ -107,22 +106,22 @@ function useActiveChallenges(url: string, enabled: boolean) {
     setLoading(true);
     try {
       setError(null);
-      const response = await fetch(`${url.replace(/\/$/, "")}/active/challenges?state=pending`);
+      const response = await fetch(`${url.replace(/\/$/, "")}/active/challenges?state=all`);
       if (!response.ok) throw new Error(`Backend responded ${response.status}`);
 
       const payload = (await response.json()) as { challenges?: unknown };
-      if (!Array.isArray(payload.challenges)) throw new Error("Invalid active challenge payload");
+      if (!Array.isArray(payload.challenges)) throw new Error("Invalid challenge payload");
 
-      setChallenges(
-        payload.challenges.map((entry) => ({
-          ...entry,
-          created_at: Number((entry as { created_at?: number }).created_at ?? 0),
-          expires_at: Number((entry as { expires_at?: number }).expires_at ?? 0),
-        })) as ActiveChallenge[],
-      );
+      const normalized = payload.challenges.map((entry) => ({
+        ...entry,
+        created_at: Number((entry as { created_at?: number }).created_at ?? 0),
+        expires_at: Number((entry as { expires_at?: number }).expires_at ?? 0),
+      })) as ActiveChallenge[];
+
+      setChallenges(normalized);
       setLastChecked(new Date().toLocaleTimeString());
     } catch (syncError) {
-      setError(syncError instanceof Error ? syncError.message : "Active auth sync failed");
+      setError(syncError instanceof Error ? syncError.message : "Active request sync failed");
     } finally {
       setLoading(false);
     }
@@ -191,10 +190,6 @@ function SegmentedProgress({
             height: "100%",
             borderRadius: 999,
             backgroundColor: toneColor,
-            shadowColor: toneColor,
-            shadowOpacity: 0.45,
-            shadowRadius: 8,
-            shadowOffset: { width: 0, height: 0 },
           }}
         />
         <View
@@ -210,10 +205,6 @@ function SegmentedProgress({
             borderWidth: 2,
             borderColor: "#0D0D0D",
             backgroundColor: toneColor,
-            shadowColor: toneColor,
-            shadowOpacity: 0.35,
-            shadowRadius: 8,
-            shadowOffset: { width: 0, height: 0 },
           }}
         />
       </View>
@@ -223,14 +214,8 @@ function SegmentedProgress({
 
 function formatSecondsRemaining(expiresAt: number) {
   const remaining = Math.max(0, expiresAt - Math.floor(Date.now() / 1000));
-  if (remaining === 0) {
-    return "Expired";
-  }
-
-  if (remaining < 60) {
-    return `${remaining}s left`;
-  }
-
+  if (remaining === 0) return "Expired";
+  if (remaining < 60) return `${remaining}s left`;
   const minutes = Math.floor(remaining / 60);
   const seconds = remaining % 60;
   return `${minutes}m ${seconds.toString().padStart(2, "0")}s left`;
@@ -243,7 +228,7 @@ function challengeStatusTone(status: ChallengeStatus) {
   return COLORS.primary;
 }
 
-function AppHeader() {
+function HeaderCard() {
   return (
     <View
       style={{
@@ -253,10 +238,6 @@ function AppHeader() {
         borderRadius: 20,
         padding: 16,
         gap: 12,
-        shadowColor: "#000000",
-        shadowOpacity: 0.28,
-        shadowRadius: 14,
-        shadowOffset: { width: 0, height: 6 },
       }}
     >
       <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
@@ -275,12 +256,12 @@ function AppHeader() {
         <View style={{ flex: 1 }}>
           <Text style={{ color: COLORS.muted, fontSize: 11, letterSpacing: 1.4 }}>XENON AUTH</Text>
           <Text style={{ color: COLORS.text, fontSize: 22, fontWeight: "800", lineHeight: 28 }}>
-            Duo-style mobile authenticator
+            Secure authenticator
           </Text>
         </View>
       </View>
       <Text style={{ color: COLORS.muted, fontSize: 14, lineHeight: 22 }}>
-        Rotating passcodes and live approve / deny requests, all from one phone screen.
+        Verify sign-ins with rotating codes and real-time approval requests.
       </Text>
     </View>
   );
@@ -339,38 +320,40 @@ function ChallengeCard({
         <Text style={{ color: COLORS.muted, fontSize: 12 }}>{formatSecondsRemaining(challenge.expires_at)}</Text>
       </View>
 
-      <View style={{ flexDirection: "row", gap: 10 }}>
-        <Pressable
-          onPress={onDeny}
-          disabled={busy}
-          style={{
-            flex: 1,
-            paddingVertical: 12,
-            borderRadius: 999,
-            alignItems: "center",
-            borderWidth: 1,
-            borderColor: COLORS.error,
-            backgroundColor: "rgba(220,38,38,0.12)",
-            opacity: busy ? 0.7 : 1,
-          }}
-        >
-          <Text style={{ color: COLORS.text, fontSize: 13, fontWeight: "800" }}>Deny</Text>
-        </Pressable>
-        <Pressable
-          onPress={onApprove}
-          disabled={busy}
-          style={{
-            flex: 1,
-            paddingVertical: 12,
-            borderRadius: 999,
-            alignItems: "center",
-            backgroundColor: COLORS.primary,
-            opacity: busy ? 0.7 : 1,
-          }}
-        >
-          <Text style={{ color: "white", fontSize: 13, fontWeight: "800" }}>Approve</Text>
-        </Pressable>
-      </View>
+      {challenge.status === "pending" ? (
+        <View style={{ flexDirection: "row", gap: 10 }}>
+          <Pressable
+            onPress={onDeny}
+            disabled={busy}
+            style={{
+              flex: 1,
+              paddingVertical: 12,
+              borderRadius: 999,
+              alignItems: "center",
+              borderWidth: 1,
+              borderColor: COLORS.error,
+              backgroundColor: "rgba(220,38,38,0.12)",
+              opacity: busy ? 0.7 : 1,
+            }}
+          >
+            <Text style={{ color: COLORS.text, fontSize: 13, fontWeight: "800" }}>Deny</Text>
+          </Pressable>
+          <Pressable
+            onPress={onApprove}
+            disabled={busy}
+            style={{
+              flex: 1,
+              paddingVertical: 12,
+              borderRadius: 999,
+              alignItems: "center",
+              backgroundColor: COLORS.primary,
+              opacity: busy ? 0.7 : 1,
+            }}
+          >
+            <Text style={{ color: "white", fontSize: 13, fontWeight: "800" }}>Approve</Text>
+          </Pressable>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -378,12 +361,14 @@ function ChallengeCard({
 function AppShell() {
   const { progress, secondsLeft, windowIndex } = useRefreshWindow();
   const insets = useSafeAreaInsets();
-  const [tab, setTab] = useState<MobileTab>("auth");
+
+  const [tab, setTab] = useState<MobileTab>("home");
   const [backendUrl, setBackendUrl] = useState(DEFAULT_BACKEND_URL);
   const [secretKey, setSecretKey] = useState(DEFAULT_SECRET);
   const [autoHealth, setAutoHealth] = useState(true);
   const [autoCodeSync, setAutoCodeSync] = useState(true);
   const [autoChallengeSync, setAutoChallengeSync] = useState(true);
+
   const [previewWords, setPreviewWords] = useState<string[]>(["PLUTO", "JAZZ", "ECHO"]);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewUpdatedAt, setPreviewUpdatedAt] = useState("");
@@ -401,16 +386,26 @@ function AppShell() {
     setError: setChallengeError,
   } = useActiveChallenges(backendUrl, autoChallengeSync);
 
+  const backendScore = status === "online" ? 1 : status === "checking" ? 0.5 : 0.12;
+
   const quickSecrets = useMemo(
     () => [
-      { label: "Demo", value: DEFAULT_SECRET },
-      { label: "A", value: "KRUGS4ZANFZSAYJA" },
-      { label: "B", value: "MZXW6YTBOI======" },
+      { label: "Primary", value: DEFAULT_SECRET },
+      { label: "Backup A", value: "KRUGS4ZANFZSAYJA" },
+      { label: "Backup B", value: "MZXW6YTBOI======" },
     ],
     [],
   );
 
-  const backendScore = status === "online" ? 1 : status === "checking" ? 0.5 : 0.12;
+  const pendingChallenges = useMemo(
+    () => challenges.filter((challenge) => challenge.status === "pending"),
+    [challenges],
+  );
+
+  const recentChallenges = useMemo(
+    () => challenges.filter((challenge) => challenge.status !== "pending").slice(0, 6),
+    [challenges],
+  );
 
   const syncPreview = async () => {
     setLoadingPreview(true);
@@ -424,27 +419,16 @@ function AppShell() {
       if (!response.ok) throw new Error(`Backend responded ${response.status}`);
 
       const payload = (await response.json()) as { words?: unknown };
-      if (!Array.isArray(payload.words) || payload.words.length !== 3) throw new Error("Invalid preview payload");
+      if (!Array.isArray(payload.words) || payload.words.length !== 3) {
+        throw new Error("Invalid passcode payload");
+      }
 
       setPreviewWords(payload.words.map((word) => String(word).toUpperCase()));
       setPreviewUpdatedAt(new Date().toLocaleTimeString());
     } catch (error) {
-      setPreviewError(error instanceof Error ? error.message : "Sync failed");
+      setPreviewError(error instanceof Error ? error.message : "Passcode sync failed");
     } finally {
       setLoadingPreview(false);
-    }
-  };
-
-  const createDemoChallenge = async () => {
-    try {
-      setChallengeError(null);
-      const response = await fetch(`${backendUrl.replace(/\/$/, "")}/active/challenges/demo`, {
-        method: "POST",
-      });
-      if (!response.ok) throw new Error(`Backend responded ${response.status}`);
-      await syncChallenges();
-    } catch (error) {
-      setChallengeError(error instanceof Error ? error.message : "Could not create demo request");
     }
   };
 
@@ -455,7 +439,19 @@ function AppShell() {
         method: "POST",
       });
       if (!response.ok) throw new Error(`Backend responded ${response.status}`);
-      setChallenges((current) => current.filter((challenge) => challenge.id !== challengeId));
+
+      setChallenges((current) =>
+        current.map((challenge) =>
+          challenge.id === challengeId
+            ? {
+                ...challenge,
+                status: action === "approve" ? "approved" : "denied",
+                responded_at: Math.floor(Date.now() / 1000),
+              }
+            : challenge,
+        ),
+      );
+
       await syncChallenges();
     } catch (error) {
       setChallengeError(error instanceof Error ? error.message : "Could not update request");
@@ -481,7 +477,7 @@ function AppShell() {
           gap: 14,
         }}
       >
-        <AppHeader />
+        <HeaderCard />
 
         <View
           style={{
@@ -495,9 +491,9 @@ function AppShell() {
           }}
         >
           {([
-            ["auth", "Auth"],
-            ["testing", "Testing"],
-            ["guide", "Guide"],
+            ["home", "Home"],
+            ["requests", "Requests"],
+            ["settings", "Settings"],
           ] as const).map(([value, label]) => (
             <Pressable
               key={value}
@@ -517,86 +513,12 @@ function AppShell() {
           ))}
         </View>
 
-        <View style={{ flexDirection: "row", gap: 12, flexWrap: "wrap" }}>
-          <Pressable onPress={() => setAutoHealth((value) => !value)} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-            <View
-              style={{
-                width: 36,
-                height: 20,
-                borderRadius: 999,
-                backgroundColor: autoHealth ? COLORS.primary : "#CBD5E1",
-                justifyContent: "center",
-                paddingHorizontal: 2,
-              }}
-            >
-              <View
-                style={{
-                  width: 16,
-                  height: 16,
-                  borderRadius: 999,
-                  backgroundColor: "white",
-                  alignSelf: autoHealth ? "flex-end" : "flex-start",
-                }}
-              />
-            </View>
-            <Text style={{ color: COLORS.muted, fontSize: 13 }}>Auto status</Text>
-          </Pressable>
-
-          <Pressable onPress={() => setAutoCodeSync((value) => !value)} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-            <View
-              style={{
-                width: 36,
-                height: 20,
-                borderRadius: 999,
-                backgroundColor: autoCodeSync ? COLORS.primary : "#CBD5E1",
-                justifyContent: "center",
-                paddingHorizontal: 2,
-              }}
-            >
-              <View
-                style={{
-                  width: 16,
-                  height: 16,
-                  borderRadius: 999,
-                  backgroundColor: "white",
-                  alignSelf: autoCodeSync ? "flex-end" : "flex-start",
-                }}
-              />
-            </View>
-            <Text style={{ color: COLORS.muted, fontSize: 13 }}>Auto code</Text>
-          </Pressable>
-
-          <Pressable onPress={() => setAutoChallengeSync((value) => !value)} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-            <View
-              style={{
-                width: 36,
-                height: 20,
-                borderRadius: 999,
-                backgroundColor: autoChallengeSync ? COLORS.primary : "#CBD5E1",
-                justifyContent: "center",
-                paddingHorizontal: 2,
-              }}
-            >
-              <View
-                style={{
-                  width: 16,
-                  height: 16,
-                  borderRadius: 999,
-                  backgroundColor: "white",
-                  alignSelf: autoChallengeSync ? "flex-end" : "flex-start",
-                }}
-              />
-            </View>
-            <Text style={{ color: COLORS.muted, fontSize: 13 }}>Auto requests</Text>
-          </Pressable>
-        </View>
-
-        {tab === "auth" ? (
+        {tab === "home" ? (
           <View style={{ gap: 14 }}>
             <View style={{ backgroundColor: COLORS.card, borderWidth: 1, borderColor: COLORS.border, borderRadius: 20, padding: 16, gap: 12 }}>
-              <Text style={{ color: COLORS.text, fontSize: 20, fontWeight: "700" }}>Rotating passcode</Text>
+              <Text style={{ color: COLORS.text, fontSize: 20, fontWeight: "700" }}>Authenticator code</Text>
               <Text style={{ color: COLORS.muted, fontSize: 13, lineHeight: 19 }}>
-                Works like a normal authenticator for passive sign-ins. The code rotates on every time window.
+                Use this rotating three-word code for sign-ins that require a one-time passcode.
               </Text>
 
               <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
@@ -619,13 +541,12 @@ function AppShell() {
                 ))}
               </View>
 
-              <SegmentedProgress label="Refresh cadence" caption={`${secondsLeft}s to next window`} value={progress} />
+              <SegmentedProgress label="Rotation window" caption={`${secondsLeft}s until refresh`} value={progress} />
 
               <Pressable
                 onPress={async () => {
-                  const token = previewWords.join(" - ");
                   try {
-                    await setStringAsync(token);
+                    await setStringAsync(previewWords.join(" - "));
                     setCopied(true);
                     setTimeout(() => setCopied(false), 1500);
                   } catch {
@@ -644,54 +565,48 @@ function AppShell() {
               </Pressable>
 
               <Text style={{ color: COLORS.muted, fontSize: 12 }}>Updated {previewUpdatedAt || "not yet"}</Text>
+              {previewError ? <Text style={{ color: COLORS.error, fontSize: 12 }}>Error: {previewError}</Text> : null}
             </View>
 
             <View style={{ backgroundColor: COLORS.card, borderWidth: 1, borderColor: COLORS.border, borderRadius: 20, padding: 16, gap: 12 }}>
+              <Text style={{ color: COLORS.text, fontSize: 20, fontWeight: "700" }}>Security overview</Text>
+              <SegmentedProgress
+                label="Backend confidence"
+                caption={status === "online" ? "Connected" : status === "checking" ? "Checking" : "Offline"}
+                value={backendScore}
+                tone={status === "online" ? "success" : status === "offline" ? "error" : "muted"}
+              />
+              <Text style={{ color: COLORS.muted, fontSize: 12 }}>Last health check: {lastChecked || "pending"}</Text>
+              <Text style={{ color: COLORS.muted, fontSize: 12 }}>Pending requests: {pendingChallenges.length}</Text>
+            </View>
+          </View>
+        ) : null}
+
+        {tab === "requests" ? (
+          <View style={{ gap: 14 }}>
+            <View style={{ backgroundColor: COLORS.card, borderWidth: 1, borderColor: COLORS.border, borderRadius: 20, padding: 16, gap: 12 }}>
               <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ color: COLORS.text, fontSize: 20, fontWeight: "700" }}>Active requests</Text>
-                  <Text style={{ color: COLORS.muted, fontSize: 13, lineHeight: 19 }}>
-                    Approve or deny live sign-in prompts like Duo Mobile.
-                  </Text>
-                </View>
+                <Text style={{ color: COLORS.text, fontSize: 20, fontWeight: "700" }}>Pending sign-in requests</Text>
                 <Pressable
                   onPress={() => void syncChallenges()}
-                  style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: COLORS.border, backgroundColor: COLORS.cardSoft }}
+                  style={{ borderWidth: 1, borderColor: COLORS.border, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: COLORS.cardSoft }}
                 >
                   <Text style={{ color: COLORS.text, fontSize: 12, fontWeight: "700" }}>{loadingChallenges ? "Syncing..." : "Refresh"}</Text>
                 </Pressable>
               </View>
-
-              <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-                <Text style={{ color: COLORS.muted, fontSize: 12 }}>Last sync: {challengeUpdatedAt || "pending"}</Text>
-                <Text style={{ color: COLORS.muted, fontSize: 12 }}>{challenges.length} pending</Text>
-              </View>
-
+              <Text style={{ color: COLORS.muted, fontSize: 12 }}>Last sync: {challengeUpdatedAt || "pending"}</Text>
               {challengeError ? <Text style={{ color: COLORS.error, fontSize: 12 }}>Error: {challengeError}</Text> : null}
 
-              {challenges.length === 0 ? (
-                <View style={{ borderWidth: 1, borderColor: COLORS.border, borderRadius: 16, padding: 14, backgroundColor: COLORS.cardSoft, gap: 10 }}>
-                  <Text style={{ color: COLORS.text, fontSize: 14, fontWeight: "700" }}>No pending requests</Text>
-                  <Text style={{ color: COLORS.muted, fontSize: 13, lineHeight: 19 }}>
-                    When a sign-in request arrives, it will appear here for quick approve / deny actions.
+              {pendingChallenges.length === 0 ? (
+                <View style={{ borderWidth: 1, borderColor: COLORS.border, borderRadius: 14, backgroundColor: COLORS.cardSoft, padding: 12 }}>
+                  <Text style={{ color: COLORS.text, fontSize: 14, fontWeight: "700" }}>No pending approvals</Text>
+                  <Text style={{ color: COLORS.muted, fontSize: 12, marginTop: 6 }}>
+                    Incoming sign-in requests will appear here for approve or deny.
                   </Text>
-                  <Pressable
-                    onPress={() => void createDemoChallenge()}
-                    style={{
-                      borderRadius: 999,
-                      paddingVertical: 10,
-                      alignItems: "center",
-                      backgroundColor: COLORS.primarySoft,
-                      borderWidth: 1,
-                      borderColor: COLORS.primary,
-                    }}
-                  >
-                    <Text style={{ color: COLORS.text, fontSize: 13, fontWeight: "800" }}>Create demo request</Text>
-                  </Pressable>
                 </View>
               ) : (
                 <View style={{ gap: 10 }}>
-                  {challenges.map((challenge) => (
+                  {pendingChallenges.map((challenge) => (
                     <ChallengeCard
                       key={challenge.id}
                       challenge={challenge}
@@ -703,94 +618,100 @@ function AppShell() {
                 </View>
               )}
             </View>
-          </View>
-        ) : null}
 
-        {tab === "testing" ? (
-          <View style={{ backgroundColor: COLORS.card, borderWidth: 1, borderColor: COLORS.border, borderRadius: 20, padding: 16, gap: 12 }}>
-            <Text style={{ color: COLORS.text, fontSize: 20, fontWeight: "700" }}>Testing console</Text>
-            <Text style={{ color: COLORS.muted, fontSize: 13, lineHeight: 19 }}>
-              Point the app at your backend, sync the passcode, or create demo active requests.
-            </Text>
-
-            <Text style={{ color: COLORS.text, fontSize: 12, fontWeight: "700" }}>Backend URL</Text>
-            <TextInput
-              style={{ borderWidth: 1, borderColor: COLORS.border, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10, color: COLORS.text, backgroundColor: COLORS.cardSoft }}
-              value={backendUrl}
-              onChangeText={setBackendUrl}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-
-            <Text style={{ color: COLORS.text, fontSize: 12, fontWeight: "700" }}>Base32 secret</Text>
-            <TextInput
-              style={{ borderWidth: 1, borderColor: COLORS.border, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10, color: COLORS.text, backgroundColor: COLORS.cardSoft }}
-              value={secretKey}
-              onChangeText={setSecretKey}
-              autoCapitalize="characters"
-              autoCorrect={false}
-            />
-
-            <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
-              {quickSecrets.map((entry) => (
-                <Pressable
-                  key={entry.label}
-                  onPress={() => setSecretKey(entry.value)}
-                  style={{ borderWidth: 1, borderColor: COLORS.border, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: COLORS.cardSoft }}
-                >
-                  <Text style={{ color: COLORS.text, fontSize: 12, fontWeight: "700" }}>{entry.label}</Text>
-                </Pressable>
-              ))}
-            </View>
-
-            <View style={{ flexDirection: "row", gap: 10, flexWrap: "wrap" }}>
-              <Pressable
-                onPress={() => void syncPreview()}
-                style={{ backgroundColor: COLORS.primary, borderRadius: 999, paddingVertical: 12, paddingHorizontal: 16, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, flexGrow: 1 }}
-              >
-                <Text style={{ color: "white", fontWeight: "700" }}>{loadingPreview ? "Syncing..." : "Sync passcode"}</Text>
-                {loadingPreview ? <ActivityIndicator color="#FFFFFF" size="small" /> : null}
-              </Pressable>
-
-              <Pressable
-                onPress={() => void createDemoChallenge()}
-                style={{ borderRadius: 999, paddingVertical: 12, paddingHorizontal: 16, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, flexGrow: 1, borderWidth: 1, borderColor: COLORS.border, backgroundColor: COLORS.cardSoft }}
-              >
-                <Text style={{ color: COLORS.text, fontWeight: "700" }}>Create demo request</Text>
-              </Pressable>
-            </View>
-
-            <SegmentedProgress label="Refresh cadence" caption={`${secondsLeft}s to next window`} value={progress} />
-
-            {previewError ? <Text style={{ color: COLORS.error, fontSize: 12 }}>Error: {previewError}</Text> : null}
-            {challengeError ? <Text style={{ color: COLORS.error, fontSize: 12 }}>Error: {challengeError}</Text> : null}
-
-            <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-              <Text style={{ color: COLORS.muted, fontSize: 12 }}>Passive sync: {previewUpdatedAt || "not yet"}</Text>
-              <Text style={{ color: COLORS.muted, fontSize: 12 }}>Active sync: {challengeUpdatedAt || "pending"}</Text>
-            </View>
-          </View>
-        ) : null}
-
-        {tab === "guide" ? (
-          <View style={{ backgroundColor: COLORS.card, borderWidth: 1, borderColor: COLORS.border, borderRadius: 20, padding: 16, gap: 10 }}>
-            <Text style={{ color: COLORS.text, fontSize: 20, fontWeight: "700" }}>How to use</Text>
-            <Text style={{ color: COLORS.muted, fontSize: 13, lineHeight: 19 }}>
-              Xenon Auth is split into two authenticator patterns: passive rotating codes and active sign-in approvals.
-            </Text>
-            {[
-              "Use the Auth tab for passcodes and incoming requests.",
-              "Use Testing to point at your backend and generate demo requests.",
-              "Approve or deny active prompts as they arrive.",
-              "Keep auto sync enabled for a Duo-style live experience.",
-            ].map((step, index) => (
-              <View key={step} style={{ flexDirection: "row", gap: 10, borderWidth: 1, borderColor: COLORS.border, borderRadius: 14, backgroundColor: COLORS.cardSoft, padding: 10 }}>
-                <View style={{ width: 24, height: 24, borderRadius: 999, backgroundColor: "rgba(255,95,31,0.15)", justifyContent: "center", alignItems: "center" }}>
-                  <Text style={{ color: COLORS.primary, fontSize: 11, fontWeight: "800" }}>{index + 1}</Text>
+            <View style={{ backgroundColor: COLORS.card, borderWidth: 1, borderColor: COLORS.border, borderRadius: 20, padding: 16, gap: 12 }}>
+              <Text style={{ color: COLORS.text, fontSize: 18, fontWeight: "700" }}>Recent decisions</Text>
+              {recentChallenges.length === 0 ? (
+                <Text style={{ color: COLORS.muted, fontSize: 12 }}>No recent approvals or denials yet.</Text>
+              ) : (
+                <View style={{ gap: 8 }}>
+                  {recentChallenges.map((challenge) => (
+                    <ChallengeCard
+                      key={challenge.id}
+                      challenge={challenge}
+                      busy={false}
+                      onApprove={() => {}}
+                      onDeny={() => {}}
+                    />
+                  ))}
                 </View>
-                <Text style={{ flex: 1, color: COLORS.muted, fontSize: 13, lineHeight: 19 }}>{step}</Text>
+              )}
+            </View>
+          </View>
+        ) : null}
+
+        {tab === "settings" ? (
+          <View style={{ gap: 14 }}>
+            <View style={{ backgroundColor: COLORS.card, borderWidth: 1, borderColor: COLORS.border, borderRadius: 20, padding: 16, gap: 12 }}>
+              <Text style={{ color: COLORS.text, fontSize: 20, fontWeight: "700" }}>App settings</Text>
+              <Text style={{ color: COLORS.muted, fontSize: 13, lineHeight: 19 }}>
+                Configure your service endpoint and secret. Keep this private.
+              </Text>
+
+              <Text style={{ color: COLORS.text, fontSize: 12, fontWeight: "700" }}>Backend URL</Text>
+              <TextInput
+                style={{ borderWidth: 1, borderColor: COLORS.border, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10, color: COLORS.text, backgroundColor: COLORS.cardSoft }}
+                value={backendUrl}
+                onChangeText={setBackendUrl}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+
+              <Text style={{ color: COLORS.text, fontSize: 12, fontWeight: "700" }}>Account secret (Base32)</Text>
+              <TextInput
+                style={{ borderWidth: 1, borderColor: COLORS.border, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10, color: COLORS.text, backgroundColor: COLORS.cardSoft }}
+                value={secretKey}
+                onChangeText={setSecretKey}
+                autoCapitalize="characters"
+                autoCorrect={false}
+              />
+
+              <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+                {quickSecrets.map((entry) => (
+                  <Pressable
+                    key={entry.label}
+                    onPress={() => setSecretKey(entry.value)}
+                    style={{ borderWidth: 1, borderColor: COLORS.border, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: COLORS.cardSoft }}
+                  >
+                    <Text style={{ color: COLORS.text, fontSize: 12, fontWeight: "700" }}>{entry.label}</Text>
+                  </Pressable>
+                ))}
               </View>
-            ))}
+
+              <Pressable
+                onPress={() => {
+                  void syncPreview();
+                  void syncChallenges();
+                }}
+                style={{
+                  backgroundColor: COLORS.primary,
+                  borderRadius: 999,
+                  paddingVertical: 12,
+                  alignItems: "center",
+                }}
+              >
+                <Text style={{ color: "white", fontWeight: "700" }}>Sync now</Text>
+              </Pressable>
+            </View>
+
+            <View style={{ backgroundColor: COLORS.card, borderWidth: 1, borderColor: COLORS.border, borderRadius: 20, padding: 16, gap: 12 }}>
+              <Text style={{ color: COLORS.text, fontSize: 18, fontWeight: "700" }}>Automatic sync</Text>
+
+              <Pressable onPress={() => setAutoHealth((value) => !value)} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                <Text style={{ color: COLORS.muted, fontSize: 13 }}>Backend health polling</Text>
+                <Text style={{ color: autoHealth ? COLORS.primary : COLORS.muted, fontWeight: "700" }}>{autoHealth ? "On" : "Off"}</Text>
+              </Pressable>
+
+              <Pressable onPress={() => setAutoCodeSync((value) => !value)} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                <Text style={{ color: COLORS.muted, fontSize: 13 }}>Passive code refresh</Text>
+                <Text style={{ color: autoCodeSync ? COLORS.primary : COLORS.muted, fontWeight: "700" }}>{autoCodeSync ? "On" : "Off"}</Text>
+              </Pressable>
+
+              <Pressable onPress={() => setAutoChallengeSync((value) => !value)} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                <Text style={{ color: COLORS.muted, fontSize: 13 }}>Active request refresh</Text>
+                <Text style={{ color: autoChallengeSync ? COLORS.primary : COLORS.muted, fontWeight: "700" }}>{autoChallengeSync ? "On" : "Off"}</Text>
+              </Pressable>
+            </View>
           </View>
         ) : null}
       </ScrollView>

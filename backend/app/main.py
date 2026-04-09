@@ -30,10 +30,10 @@ class WordPreviewRequest(BaseModel):
 
 
 class ActiveChallengeCreateRequest(BaseModel):
-    user: str = Field(default="demo.user@xenon.local", description="User being challenged")
-    application: str = Field(default="Xenon VPN", description="Service requesting approval")
-    location: str = Field(default="Browser sign-in", description="Login source or location")
-    device_label: str = Field(default="Demo device", description="Originating device label")
+    user: str = Field(default="unknown.user@xenon", description="User being challenged")
+    application: str = Field(default="Xenon Auth Request", description="Service requesting approval")
+    location: str = Field(default="Unknown location", description="Login source or location")
+    device_label: str = Field(default="Unknown device", description="Originating device label")
     message: str | None = Field(default=None, description="Custom display message")
 
 
@@ -155,19 +155,6 @@ def create_active_challenge(payload: ActiveChallengeCreateRequest) -> dict[str, 
     with _challenge_lock:
         _active_challenges[record["id"]] = record
     return record
-
-
-@app.post("/active/challenges/demo", response_model=ActiveChallengeRecord)
-def create_demo_active_challenge() -> dict[str, object]:
-    return create_active_challenge(
-        ActiveChallengeCreateRequest(
-            user="demo.user@xenon.local",
-            application="Xenon Demo Portal",
-            location="Browser sign-in",
-            device_label="Demo browser",
-            message="Approve the demo sign-in attempt",
-        )
-    )
 
 
 @app.post("/active/challenges/{challenge_id}/approve", response_model=ActiveChallengeRecord)
