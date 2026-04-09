@@ -1,6 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { CameraView, useCameraPermissions } from "expo-camera";
-import { setStringAsync } from "expo-clipboard";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -277,7 +276,6 @@ function AppShell() {
   const [showScanner, setShowScanner] = useState(false);
   const [scanLocked, setScanLocked] = useState(false);
   const [setupError, setSetupError] = useState<string | null>(null);
-  const [copiedAccountId, setCopiedAccountId] = useState<string | null>(null);
 
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
 
@@ -662,26 +660,6 @@ function AppShell() {
                       <Text style={{ color: COLORS.text, fontSize: 15, fontWeight: "800" }}>{account.issuer}</Text>
                       <Text style={{ color: COLORS.muted, fontSize: 12 }}>{account.account}</Text>
                     </View>
-                    <Pressable
-                      onPress={async () => {
-                        await setStringAsync(account.words.join(" - "));
-                        setCopiedAccountId(account.id);
-                        setTimeout(() => setCopiedAccountId(null), 1200);
-                      }}
-                      style={({ pressed }) => ({
-                        borderWidth: 1,
-                        borderColor: COLORS.border,
-                        borderRadius: 999,
-                        backgroundColor: COLORS.cardSoft,
-                        paddingHorizontal: 10,
-                        paddingVertical: 6,
-                        ...pressFeedback(pressed),
-                      })}
-                    >
-                      <Text style={{ color: COLORS.text, fontSize: 12, fontWeight: "700" }}>
-                        {copiedAccountId === account.id ? "Copied" : "Copy"}
-                      </Text>
-                    </Pressable>
                   </View>
 
                   <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>

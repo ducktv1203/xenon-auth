@@ -22,6 +22,7 @@ import RefreshRoundedIcon from "@mui/icons-material/RefreshRounded";
 import QrCodeRoundedIcon from "@mui/icons-material/QrCodeRounded";
 import BlockRoundedIcon from "@mui/icons-material/BlockRounded";
 import AddRoundedIcon from "@mui/icons-material/AddRounded";
+import DeleteOutlineRoundedIcon from "@mui/icons-material/DeleteOutlineRounded";
 import { QRCodeSVG } from "qrcode.react";
 import { BrandLogo } from "./BrandLogo";
 
@@ -44,16 +45,39 @@ type ActiveChallenge = {
   expires_at: number;
 };
 
+type DemoPortal = {
+  id: string;
+  issuer: string;
+  account: string;
+  secret: string;
+  setupUri: string;
+  createdAt: string;
+};
+
+const BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+
+function generateBase32Secret(length = 16) {
+  let out = "";
+  for (let i = 0; i < length; i += 1) {
+    out += BASE32_ALPHABET[Math.floor(Math.random() * BASE32_ALPHABET.length)];
+  }
+  return out;
+}
+
 export default function App() {
   const [tab, setTab] = useState<PortalTab>("codes");
   const [backendUrl, setBackendUrl] = useState(DEFAULT_BACKEND_URL);
   const [health, setHealth] = useState<"checking" | "online" | "offline">("checking");
 
   const [secretKey, setSecretKey] = useState(DEFAULT_SECRET);
-  const [accountName, setAccountName] = useState("user@xenon");
-  const [issuerName, setIssuerName] = useState("Xenon Auth");
-  const [setupUri, setSetupUri] = useState("");
-  const [setupError, setSetupError] = useState<string | null>(null);
+  const [portalDraft, setPortalDraft] = useState({
+    accountName: "user@xenon",
+    issuerName: "Xenon Auth",
+    secretKey: generateBase32Secret(),
+  });
+  const [portalError, setPortalError] = useState<string | null>(null);
+  const [portalLoading, setPortalLoading] = useState(false);
+  const [demoPortals, setDemoPortals] = useState<DemoPortal[]>([]);
 
   const [previewWords, setPreviewWords] = useState<string[]>(["----", "----", "----"]);
   const [previewError, setPreviewError] = useState<string | null>(null);
@@ -194,16 +218,19 @@ export default function App() {
     }
   };
 
-  const generateSetupUri = async () => {
+  const createDemoPortal = async () => {
+    setPortalLoading(true);
     try {
-      setSetupError(null);
+      setPortalError(null);
+      const normalizedSecret = (portalDraft.secretKey || "").trim().toUpperCase() || generateBase32Secret();
+
       const response = await fetch(`${baseUrl}/enrollment/setup-uri`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          secret_key: secretKey,
-          account_name: accountName,
-          issuer: issuerName,
+          secret_key: normalizedSecret,
+          account_name: portalDraft.accountName,
+          issuer: portalDraft.issuerName,
         }),
       });
       if (!response.ok) throw new Error(`Backend ${response.status}`);
@@ -212,10 +239,36 @@ export default function App() {
       if (typeof payload.otpauth_uri !== "string") {
         throw new Error("Invalid enrollment response");
       }
-      setSetupUri(payload.otpauth_uri);
+      const setupUri = payload.otpauth_uri;
+
+      setDemoPortals((current) => [
+        {
+          id: `${portalDraft.issuerName}:${portalDraft.accountName}:${Date.now()}`,
+          issuer: portalDraft.issuerName,
+          account: portalDraft.accountName,
+          secret: normalizedSecret,
+          setupUri,
+          createdAt: new Date().toLocaleTimeString(),
+        },
+        ...current,
+      ]);
+
+      setPortalDraft((current) => ({
+        ...current,
+        accountName: current.accountName.includes("+")
+          ? current.accountName.replace(/\+\d+(?=@)/, (match) => `+${Number(match.slice(1)) + 1}`)
+          : current.accountName.replace("@", "+2@"),
+        secretKey: generateBase32Secret(),
+      }));
     } catch (error) {
-      setSetupError(error instanceof Error ? error.message : "Could not generate setup URI");
+      setPortalError(error instanceof Error ? error.message : "Could not create demo portal");
+    } finally {
+      setPortalLoading(false);
     }
+  };
+
+  const deleteDemoPortal = (portalId: string) => {
+    setDemoPortals((current) => current.filter((portal) => portal.id !== portalId));
   };
 
   const refreshChallenges = async () => {
@@ -342,7 +395,7 @@ export default function App() {
           <Card sx={{ border: "1px solid #242424", bgcolor: "#111" }}>
             <CardContent sx={{ display: "grid", gap: 2.5 }}>
               <Typography variant="h6" sx={{ fontWeight: 800 }}>
-                Setup URI and phone phrase verifier
+                Multi portal enrollment and phrase verifier
               </Typography>
               <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
                 <TextField
@@ -352,26 +405,64 @@ export default function App() {
                   fullWidth
                 />
                 <TextField
-                  label="Account"
-                  value={accountName}
-                  onChange={(event) => setAccountName(event.target.value)}
+                  label="Portal account"
+                  value={portalDraft.accountName}
+                  onChange={(event) =>
+                    setPortalDraft((current) => ({
+                      ...current,
+                      accountName: event.target.value,
+                    }))
+                  }
                   fullWidth
                 />
                 <TextField
-                  label="Issuer"
-                  value={issuerName}
-                  onChange={(event) => setIssuerName(event.target.value)}
+                  label="Portal issuer"
+                  value={portalDraft.issuerName}
+                  onChange={(event) =>
+                    setPortalDraft((current) => ({
+                      ...current,
+                      issuerName: event.target.value,
+                    }))
+                  }
                   fullWidth
                 />
+              </Stack>
+
+              <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
+                <TextField
+                  label="Portal secret"
+                  value={portalDraft.secretKey}
+                  onChange={(event) =>
+                    setPortalDraft((current) => ({
+                      ...current,
+                      secretKey: event.target.value.toUpperCase(),
+                    }))
+                  }
+                  helperText="Each portal can use a different secret for separate mobile accounts."
+                  fullWidth
+                />
+                <Button
+                  variant="outlined"
+                  sx={{ minWidth: { md: 210 } }}
+                  onClick={() =>
+                    setPortalDraft((current) => ({
+                      ...current,
+                      secretKey: generateBase32Secret(),
+                    }))
+                  }
+                >
+                  Randomize secret
+                </Button>
               </Stack>
 
               <Stack direction="row" spacing={1.5}>
                 <Button
                   variant="contained"
                   startIcon={<QrCodeRoundedIcon />}
-                  onClick={() => void generateSetupUri()}
+                  disabled={portalLoading}
+                  onClick={() => void createDemoPortal()}
                 >
-                  Generate Setup QR
+                  {portalLoading ? "Creating..." : "Create demo portal"}
                 </Button>
                 <Button
                   variant="outlined"
@@ -383,7 +474,7 @@ export default function App() {
                 </Button>
               </Stack>
 
-              {setupError ? <Alert severity="error">{setupError}</Alert> : null}
+              {portalError ? <Alert severity="error">{portalError}</Alert> : null}
               {previewError ? <Alert severity="error">{previewError}</Alert> : null}
 
               <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
@@ -420,18 +511,84 @@ export default function App() {
 
                 <Paper sx={{ p: 2, flex: 1, border: "1px solid #242424", bgcolor: "#0E0E0E" }}>
                   <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                    Setup URI QR
+                    Demo portal list
                   </Typography>
-                  {setupUri ? (
-                    <Box sx={{ display: "grid", gap: 1.5, justifyItems: "center" }}>
-                      <Box sx={{ backgroundColor: "#fff", p: 1, borderRadius: 1 }}>
-                        <QRCodeSVG value={setupUri} size={164} />
-                      </Box>
-                      <TextField value={setupUri} multiline minRows={2} fullWidth slotProps={{ input: { readOnly: true } }} />
-                    </Box>
+                  {demoPortals.length > 0 ? (
+                    <Stack spacing={1.5}>
+                      {demoPortals.map((portal) => (
+                        <Paper key={portal.id} sx={{ p: 1.5, border: "1px solid #2C2C2C", bgcolor: "#111" }}>
+                          <Box sx={{ display: "grid", gap: 1 }}>
+                            <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                              {portal.issuer}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              {portal.account} · Created {portal.createdAt}
+                            </Typography>
+                            <Box sx={{ display: "flex", justifyContent: "center", py: 0.5 }}>
+                              <Box sx={{ backgroundColor: "#fff", p: 0.8, borderRadius: 1 }}>
+                                <QRCodeSVG value={portal.setupUri} size={130} />
+                              </Box>
+                            </Box>
+                            <TextField
+                              label="Setup URI"
+                              value={portal.setupUri}
+                              multiline
+                              minRows={2}
+                              fullWidth
+                              slotProps={{ input: { readOnly: true } }}
+                            />
+                            <TextField
+                              label="Secret"
+                              value={portal.secret}
+                              fullWidth
+                              slotProps={{ input: { readOnly: true } }}
+                            />
+                            <Button
+                              variant="outlined"
+                              color="error"
+                              startIcon={<DeleteOutlineRoundedIcon />}
+                              onClick={() => deleteDemoPortal(portal.id)}
+                            >
+                              Delete portal
+                            </Button>
+                          </Box>
+                        </Paper>
+                      ))}
+
+                      <Paper sx={{ p: 1.5, border: "1px solid #2C2C2C", bgcolor: "#101010" }}>
+                        <Typography variant="body2" sx={{ fontWeight: 700, mb: 1 }}>
+                          Demo records ({demoPortals.length})
+                        </Typography>
+                        <Stack spacing={0.75}>
+                          {demoPortals.map((portal, index) => (
+                            <Box
+                              key={`record-${portal.id}`}
+                              sx={{
+                                display: "grid",
+                                gridTemplateColumns: "46px 1fr auto",
+                                gap: 1,
+                                alignItems: "center",
+                                py: 0.5,
+                                borderTop: index === 0 ? "none" : "1px solid #242424",
+                              }}
+                            >
+                              <Typography variant="caption" color="text.secondary">
+                                #{demoPortals.length - index}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                {portal.issuer} / {portal.account}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                {portal.createdAt}
+                              </Typography>
+                            </Box>
+                          ))}
+                        </Stack>
+                      </Paper>
+                    </Stack>
                   ) : (
                     <Typography variant="body2" color="text.secondary">
-                      Generate setup URI to render QR.
+                      Create demo portals to generate multiple QR/URI entries for mobile import.
                     </Typography>
                   )}
                 </Paper>
