@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { CameraView, useCameraPermissions } from "expo-camera";
+import * as Notifications from "expo-notifications";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -9,6 +10,7 @@ import {
   ScrollView,
   Text,
   TextInput,
+  Vibration,
   View,
 } from "react-native";
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
@@ -16,6 +18,17 @@ import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from "react-native-
 const STEP_SECONDS = 60;
 const BACKEND_URL = "http://localhost:8000";
 const STORAGE_KEY = "xenon_auth_accounts_v1";
+const REQUESTS_NOTIFICATION_CHANNEL = "xenon-auth-requests";
+
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
 
 type Mode = "passive" | "active";
 type ChallengeStatus = "pending" | "approved" | "denied" | "expired";
@@ -291,6 +304,10 @@ function AppShell() {
   const [challengeCodes, setChallengeCodes] = useState<Record<string, string>>({});
   const [challengeError, setChallengeError] = useState<string | null>(null);
   const [loadingChallenges, setLoadingChallenges] = useState(false);
+  const [incomingChallengeId, setIncomingChallengeId] = useState<string | null>(null);
+  const knownPendingIdsRef = useRef<Set<string>>(new Set());
+  const didInitPendingSnapshotRef = useRef(false);
+  const notificationListenerRef = useRef<Notifications.EventSubscription | null>(null);
 
   const pendingChallenges = useMemo(
     () => challenges.filter((challenge) => challenge.status === "pending"),
@@ -300,6 +317,11 @@ function AppShell() {
   const recentChallenges = useMemo(
     () => challenges.filter((challenge) => challenge.status !== "pending").slice(0, 6),
     [challenges],
+  );
+
+  const incomingChallenge = useMemo(
+    () => challenges.find((challenge) => challenge.id === incomingChallengeId) ?? null,
+    [challenges, incomingChallengeId],
   );
 
   const reportEnrollmentConnection = async (
@@ -573,6 +595,66 @@ function AppShell() {
     }, 15_000);
     return () => clearInterval(id);
   }, []);
+
+  useEffect(() => {
+    const configureNotifications = async () => {
+      const permissions = await Notifications.getPermissionsAsync();
+      if (permissions.status !== "granted") {
+        await Notifications.requestPermissionsAsync();
+      }
+
+      await Notifications.setNotificationChannelAsync(REQUESTS_NOTIFICATION_CHANNEL, {
+        name: "Sign-in requests",
+        importance: Notifications.AndroidImportance.HIGH,
+        vibrationPattern: [0, 220, 120, 220],
+        lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+      });
+    };
+
+    void configureNotifications();
+
+    notificationListenerRef.current = Notifications.addNotificationResponseReceivedListener(() => {
+      setMode("active");
+    });
+
+    return () => {
+      notificationListenerRef.current?.remove();
+      notificationListenerRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const pendingIds = pendingChallenges.map((challenge) => challenge.id);
+
+    if (!didInitPendingSnapshotRef.current) {
+      knownPendingIdsRef.current = new Set(pendingIds);
+      didInitPendingSnapshotRef.current = true;
+      return;
+    }
+
+    const newChallenge = pendingChallenges
+      .filter((challenge) => !knownPendingIdsRef.current.has(challenge.id))
+      .sort((a, b) => b.created_at - a.created_at)[0];
+
+    if (newChallenge) {
+      setIncomingChallengeId(newChallenge.id);
+      Vibration.vibrate(220);
+      void Notifications.scheduleNotificationAsync({
+        content: {
+          title: "Xenon Auth",
+          body: `${newChallenge.application} sign-in request for ${newChallenge.user}`,
+          data: { challengeId: newChallenge.id },
+        },
+        trigger: null,
+      });
+    }
+
+    knownPendingIdsRef.current = new Set(pendingIds);
+
+    if (incomingChallengeId && !pendingIds.includes(incomingChallengeId)) {
+      setIncomingChallengeId(null);
+    }
+  }, [incomingChallengeId, pendingChallenges]);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.bg }} edges={["top", "left", "right"]}>
@@ -1011,6 +1093,86 @@ function AppShell() {
           >
             <Text style={{ color: COLORS.text, fontWeight: "800", fontSize: 13 }}>Cancel</Text>
           </Pressable>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={Boolean(incomingChallenge)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setIncomingChallengeId(null)}
+      >
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: "rgba(0,0,0,0.62)",
+            justifyContent: "center",
+            alignItems: "center",
+            paddingHorizontal: 14,
+          }}
+        >
+          <View
+            style={{
+              width: "92%",
+              maxWidth: 360,
+              borderRadius: 16,
+              borderWidth: 1,
+              borderColor: COLORS.border,
+              backgroundColor: COLORS.card,
+              padding: 14,
+              gap: 10,
+            }}
+          >
+            <Text style={{ color: COLORS.text, fontSize: 16, fontWeight: "800" }}>New sign-in request</Text>
+            {incomingChallenge ? (
+              <>
+                <Text style={{ color: COLORS.text, fontSize: 15, fontWeight: "700" }}>
+                  {incomingChallenge.application}
+                </Text>
+                <Text style={{ color: COLORS.muted, fontSize: 12 }}>{incomingChallenge.user}</Text>
+                <Text style={{ color: COLORS.muted, fontSize: 12 }}>
+                  {incomingChallenge.location} · {incomingChallenge.device_label}
+                </Text>
+                <Text style={{ color: COLORS.muted, fontSize: 12 }}>
+                  {formatSecondsRemaining(incomingChallenge.expires_at)}
+                </Text>
+              </>
+            ) : null}
+
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              <Pressable
+                onPress={() => setIncomingChallengeId(null)}
+                style={({ pressed }) => ({
+                  flex: 1,
+                  borderRadius: 999,
+                  borderWidth: 1,
+                  borderColor: COLORS.border,
+                  backgroundColor: COLORS.cardSoft,
+                  paddingVertical: 10,
+                  alignItems: "center",
+                  ...pressFeedback(pressed),
+                })}
+              >
+                <Text style={{ color: COLORS.text, fontWeight: "800", fontSize: 13 }}>Dismiss</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => {
+                  setIncomingChallengeId(null);
+                  setMode("active");
+                }}
+                style={({ pressed }) => ({
+                  flex: 1,
+                  borderRadius: 999,
+                  backgroundColor: COLORS.primary,
+                  paddingVertical: 10,
+                  alignItems: "center",
+                  ...pressFeedback(pressed),
+                })}
+              >
+                <Text style={{ color: "white", fontWeight: "800", fontSize: 13 }}>Open requests</Text>
+              </Pressable>
+            </View>
+          </View>
         </View>
       </Modal>
 
