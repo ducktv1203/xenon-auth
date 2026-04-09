@@ -104,11 +104,11 @@ function SegmentedProgress({
       <View
         style={{
           position: "relative",
-          height: 16,
+          height: 14,
           borderRadius: 999,
           borderWidth: 1,
           borderColor: COLORS.border,
-          backgroundColor: "#222222",
+          backgroundColor: "#1b1b1b",
           overflow: "hidden",
         }}
       >
@@ -118,6 +118,10 @@ function SegmentedProgress({
             height: "100%",
             borderRadius: 999,
             backgroundColor: toneColor,
+            shadowColor: toneColor,
+            shadowOpacity: 0.45,
+            shadowRadius: 8,
+            shadowOffset: { width: 0, height: 0 },
           }}
         />
         <View
@@ -133,26 +137,12 @@ function SegmentedProgress({
             borderWidth: 2,
             borderColor: "#0D0D0D",
             backgroundColor: toneColor,
+            shadowColor: toneColor,
+            shadowOpacity: 0.35,
+            shadowRadius: 8,
+            shadowOffset: { width: 0, height: 0 },
           }}
         />
-        <View
-          pointerEvents="none"
-          style={{
-            position: "absolute",
-            left: 8,
-            right: 8,
-            top: 0,
-            bottom: 0,
-            flexDirection: "row",
-            justifyContent: "space-between",
-            alignItems: "center",
-            opacity: 0.25,
-          }}
-        >
-          {Array.from({ length: 6 }).map((_, index) => (
-            <View key={index} style={{ width: 1, height: 9, backgroundColor: COLORS.text }} />
-          ))}
-        </View>
       </View>
     </View>
   );
@@ -224,6 +214,10 @@ export default function App() {
             borderRadius: 20,
             padding: 16,
             gap: 12,
+            shadowColor: "#000000",
+            shadowOpacity: 0.28,
+            shadowRadius: 14,
+            shadowOffset: { width: 0, height: 6 },
           }}
         >
           <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
