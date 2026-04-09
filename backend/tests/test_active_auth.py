@@ -1,16 +1,18 @@
 from fastapi.testclient import TestClient
 
-from app.main import _active_challenges, app
+from app.main import _active_challenges, _enrollment_connections, app
 
 client = TestClient(app)
 
 
 def setup_function() -> None:
     _active_challenges.clear()
+    _enrollment_connections.clear()
 
 
 def teardown_function() -> None:
     _active_challenges.clear()
+    _enrollment_connections.clear()
 
 
 def test_create_and_list_pending_challenge() -> None:
@@ -95,6 +97,42 @@ def test_create_challenge_with_custom_ttl() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["expires_at"] - payload["created_at"] == 300
+
+
+def test_enrollment_connection_status_lifecycle() -> None:
+    status_before = client.get(
+        "/enrollment/connection-status",
+        params={
+            "secret_key": "JBSWY3DPEHPK3PXP",
+            "account_name": "alice@example.com",
+            "issuer": "Xenon Auth",
+        },
+    )
+    assert status_before.status_code == 200
+    assert status_before.json()["connected"] is False
+
+    update = client.post(
+        "/enrollment/connection",
+        json={
+            "secret_key": "JBSWY3DPEHPK3PXP",
+            "account_name": "alice@example.com",
+            "issuer": "Xenon Auth",
+            "connected": True,
+        },
+    )
+    assert update.status_code == 200
+    assert update.json()["connected"] is True
+
+    status_after = client.get(
+        "/enrollment/connection-status",
+        params={
+            "secret_key": "JBSWY3DPEHPK3PXP",
+            "account_name": "alice@example.com",
+            "issuer": "Xenon Auth",
+        },
+    )
+    assert status_after.status_code == 200
+    assert status_after.json()["connected"] is True
 
 
 def test_setup_uri_endpoint() -> None:

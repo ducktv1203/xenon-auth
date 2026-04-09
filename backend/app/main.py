@@ -34,6 +34,8 @@ ChallengeStatus = Literal["pending", "approved", "denied", "expired"]
 _ACTIVE_CHALLENGE_TTL_SECONDS = 120
 _challenge_lock = Lock()
 _active_challenges: dict[str, dict[str, object]] = {}
+_enrollment_lock = Lock()
+_enrollment_connections: dict[str, dict[str, object]] = {}
 
 
 class WordPreviewRequest(BaseModel):
@@ -45,6 +47,13 @@ class SetupUriRequest(BaseModel):
     secret_key: str = Field(..., description="Base32 secret key")
     account_name: str = Field(default="user@xenon", description="Account label shown in authenticator")
     issuer: str = Field(default="Xenon Auth", description="Issuer label shown in authenticator")
+
+
+class EnrollmentConnectionUpdateRequest(BaseModel):
+    secret_key: str = Field(..., description="Base32 secret key")
+    account_name: str = Field(..., description="Account label")
+    issuer: str = Field(..., description="Issuer label")
+    connected: bool = Field(default=True, description="Current enrollment connection state")
 
 
 class ActiveChallengeCreateRequest(BaseModel):
@@ -143,6 +152,16 @@ def _build_otpauth_uri(secret_key: str, account_name: str, issuer: str) -> str:
     )
 
 
+def _enrollment_key(secret_key: str, account_name: str, issuer: str) -> str:
+    return "|".join(
+        [
+            secret_key.strip().replace(" ", "").upper(),
+            account_name.strip().lower(),
+            issuer.strip().lower(),
+        ]
+    )
+
+
 def _set_challenge_status(challenge_id: str, status: ChallengeStatus) -> dict[str, object]:
     with _challenge_lock:
         record = _active_challenges.get(challenge_id)
@@ -186,6 +205,28 @@ def preview_words(payload: WordPreviewRequest) -> dict[str, object]:
 def create_setup_uri(payload: SetupUriRequest) -> dict[str, str]:
     uri = _build_otpauth_uri(payload.secret_key, payload.account_name, payload.issuer)
     return {"otpauth_uri": uri}
+
+
+@app.post("/enrollment/connection")
+def update_enrollment_connection(payload: EnrollmentConnectionUpdateRequest) -> dict[str, object]:
+    key = _enrollment_key(payload.secret_key, payload.account_name, payload.issuer)
+    now = _now_unix()
+    with _enrollment_lock:
+        _enrollment_connections[key] = {
+            "connected": payload.connected,
+            "updated_at": now,
+        }
+    return {"connected": payload.connected, "updated_at": now}
+
+
+@app.get("/enrollment/connection-status")
+def get_enrollment_connection_status(secret_key: str, account_name: str, issuer: str) -> dict[str, object]:
+    key = _enrollment_key(secret_key, account_name, issuer)
+    with _enrollment_lock:
+        record = _enrollment_connections.get(key)
+    if record is None:
+        return {"connected": False, "updated_at": None}
+    return {"connected": bool(record["connected"]), "updated_at": record["updated_at"]}
 
 
 @app.get("/active/challenges")

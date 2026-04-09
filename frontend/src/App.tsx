@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   AppBar,
@@ -31,8 +31,6 @@ import { QRCodeSVG } from "qrcode.react";
 import { BrandLogo } from "./BrandLogo";
 
 const DEFAULT_BACKEND_URL = "http://localhost:8000";
-const DEFAULT_SECRET = "JBSWY3DPEHPK3PXP";
-
 type PortalTab = "codes" | "requests";
 type ChallengeStatus = "pending" | "approved" | "denied" | "expired";
 
@@ -127,19 +125,14 @@ export default function App() {
   const [backendUrl, setBackendUrl] = useState(DEFAULT_BACKEND_URL);
   const [health, setHealth] = useState<"checking" | "online" | "offline">("checking");
 
-  const [secretKey, setSecretKey] = useState(DEFAULT_SECRET);
   const [portalDraft, setPortalDraft] = useState(() => generateRandomPortalDraft());
   const [portalError, setPortalError] = useState<string | null>(null);
   const [portalLoading, setPortalLoading] = useState(false);
   const [demoPortals, setDemoPortals] = useState<DemoPortal[]>([]);
   const [expandedPortalIds, setExpandedPortalIds] = useState<string[]>([]);
-
-  const [previewWords, setPreviewWords] = useState<string[]>(["----", "----", "----"]);
-  const [previewError, setPreviewError] = useState<string | null>(null);
-  const [previewLoading, setPreviewLoading] = useState(false);
-  const [phonePhraseParts, setPhonePhraseParts] = useState<[string, string, string]>(["", "", ""]);
-  const [verifyResult, setVerifyResult] = useState<{ ok: boolean; message: string } | null>(null);
-  const phraseFieldRefs = useRef<Array<HTMLInputElement | null>>([]);
+  const [portalPhraseParts, setPortalPhraseParts] = useState<Record<string, [string, string, string]>>({});
+  const [portalVerifyResults, setPortalVerifyResults] = useState<Record<string, { ok: boolean; message: string }>>({});
+  const [verifyingPortalId, setVerifyingPortalId] = useState<string | null>(null);
 
   const [newChallenge, setNewChallenge] = useState({
     user: "user@xenon",
@@ -165,83 +158,24 @@ export default function App() {
     }
   };
 
-  const refreshPreview = async () => {
-    setPreviewLoading(true);
-    try {
-      setPreviewError(null);
-      const response = await fetch(`${baseUrl}/preview/words`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ secret_key: secretKey }),
-      });
-      if (!response.ok) throw new Error(`Backend ${response.status}`);
-
-      const payload = (await response.json()) as { words?: unknown };
-      if (!Array.isArray(payload.words) || payload.words.length !== 3) {
-        throw new Error("Invalid preview response");
-      }
-      setPreviewWords(payload.words.map((word) => String(word).toUpperCase()));
-    } catch (error) {
-      setPreviewError(error instanceof Error ? error.message : "Preview sync failed");
-    } finally {
-      setPreviewLoading(false);
-    }
-  };
-
-  const normalizePhrase = (value: string) =>
-    value
-      .toUpperCase()
-      .split(/[^A-Z0-9]+/)
-      .filter(Boolean)
-      .slice(0, 3);
-
   const sanitizeWord = (value: string) => value.toUpperCase().replace(/[^A-Z0-9]/g, "");
-
-  const setPhrasePart = (index: 0 | 1 | 2, value: string) => {
+  const setPortalPhrasePart = (portalId: string, index: 0 | 1 | 2, value: string) => {
     const cleaned = sanitizeWord(value);
-    setPhonePhraseParts((current) => {
-      const next: [string, string, string] = [...current] as [string, string, string];
+    setPortalPhraseParts((current) => {
+      const existing = current[portalId] || ["", "", ""];
+      const next: [string, string, string] = [...existing] as [string, string, string];
       next[index] = cleaned;
-      return next;
+      return { ...current, [portalId]: next };
     });
   };
 
-  const onPhraseFieldKeyDown = async (
-    event: React.KeyboardEvent<HTMLDivElement>,
-    index: 0 | 1 | 2,
-  ) => {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      await verifyPhonePhrase();
-      return;
-    }
-
-    if (event.key === "Backspace" && !phonePhraseParts[index] && index > 0) {
-      phraseFieldRefs.current[index - 1]?.focus();
-    }
-  };
-
-  const onPhrasePaste = (event: React.ClipboardEvent<HTMLDivElement>) => {
-    const pasted = event.clipboardData.getData("text");
-    const tokens = normalizePhrase(pasted);
-    if (tokens.length === 0) return;
-
-    event.preventDefault();
-    setPhonePhraseParts([tokens[0] || "", tokens[1] || "", tokens[2] || ""]);
-    const focusIndex = Math.min(2, Math.max(0, tokens.length - 1));
-    phraseFieldRefs.current[focusIndex]?.focus();
-  };
-
-  const verifyPhonePhrase = async () => {
-    setPreviewLoading(true);
+  const verifyPortalPhrase = async (portal: DemoPortal) => {
+    setVerifyingPortalId(portal.id);
     try {
-      setPreviewError(null);
-      setVerifyResult(null);
-
       const response = await fetch(`${baseUrl}/preview/words`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ secret_key: secretKey }),
+        body: JSON.stringify({ secret_key: portal.secret }),
       });
       if (!response.ok) throw new Error(`Backend ${response.status}`);
 
@@ -251,25 +185,36 @@ export default function App() {
       }
 
       const expected = payload.words.map((word) => String(word).toUpperCase());
-      setPreviewWords(expected);
+      const actual = (portalPhraseParts[portal.id] || ["", "", ""])
+        .map((part) => sanitizeWord(part))
+        .filter(Boolean);
 
-      const actual = phonePhraseParts.map((part) => sanitizeWord(part)).filter(Boolean);
       if (actual.length !== 3) {
-        setVerifyResult({ ok: false, message: "Enter exactly 3 words from your phone." });
+        setPortalVerifyResults((current) => ({
+          ...current,
+          [portal.id]: { ok: false, message: "Enter exactly 3 code words." },
+        }));
         return;
       }
 
       const matched = actual.every((word, index) => word === expected[index]);
-      setVerifyResult({
-        ok: matched,
-        message: matched
-          ? "Phrase is valid for the current window."
-          : "Phrase does not match the current window. Refresh code on phone and try again.",
-      });
+      setPortalVerifyResults((current) => ({
+        ...current,
+        [portal.id]: {
+          ok: matched,
+          message: matched ? "Code is valid for this portal." : "Code does not match this portal.",
+        },
+      }));
     } catch (error) {
-      setPreviewError(error instanceof Error ? error.message : "Phrase verification failed");
+      setPortalVerifyResults((current) => ({
+        ...current,
+        [portal.id]: {
+          ok: false,
+          message: error instanceof Error ? error.message : "Code verification failed",
+        },
+      }));
     } finally {
-      setPreviewLoading(false);
+      setVerifyingPortalId((current) => (current === portal.id ? null : current));
     }
   };
 
@@ -295,10 +240,11 @@ export default function App() {
         throw new Error("Invalid enrollment response");
       }
       const setupUri = payload.otpauth_uri;
+      const portalId = `${portalDraft.issuerName}:${portalDraft.accountName}:${Date.now()}`;
 
       setDemoPortals((current) => [
         {
-          id: `${portalDraft.issuerName}:${portalDraft.accountName}:${Date.now()}`,
+          id: portalId,
           issuer: portalDraft.issuerName,
           account: portalDraft.accountName,
           secret: normalizedSecret,
@@ -308,6 +254,9 @@ export default function App() {
         },
         ...current,
       ]);
+
+      // New portals start as not connected, so keep QR/details expanded for quick mobile import.
+      setExpandedPortalIds((current) => (current.includes(portalId) ? current : [portalId, ...current]));
 
       setPortalDraft(generateRandomPortalDraft());
     } catch (error) {
@@ -320,6 +269,16 @@ export default function App() {
   const deleteDemoPortal = (portalId: string) => {
     setDemoPortals((current) => current.filter((portal) => portal.id !== portalId));
     setExpandedPortalIds((current) => current.filter((id) => id !== portalId));
+    setPortalPhraseParts((current) => {
+      const next = { ...current };
+      delete next[portalId];
+      return next;
+    });
+    setPortalVerifyResults((current) => {
+      const next = { ...current };
+      delete next[portalId];
+      return next;
+    });
   };
 
   const togglePortalExpanded = (portalId: string) => {
@@ -328,12 +287,45 @@ export default function App() {
     );
   };
 
-  const togglePortalConnected = (portalId: string) => {
-    setDemoPortals((current) =>
-      current.map((portal) =>
-        portal.id === portalId ? { ...portal, connected: !portal.connected } : portal,
-      ),
+  const refreshPortalConnections = async () => {
+    if (demoPortals.length === 0) return;
+
+    const statuses = await Promise.all(
+      demoPortals.map(async (portal) => {
+        try {
+          const params = new URLSearchParams({
+            secret_key: portal.secret,
+            account_name: portal.account,
+            issuer: portal.issuer,
+          });
+          const response = await fetch(`${baseUrl}/enrollment/connection-status?${params.toString()}`);
+          if (!response.ok) return { id: portal.id, connected: false };
+          const payload = (await response.json()) as { connected?: unknown };
+          return { id: portal.id, connected: payload.connected === true };
+        } catch {
+          return { id: portal.id, connected: false };
+        }
+      }),
     );
+
+    const map = new Map(statuses.map((status) => [status.id, status.connected]));
+    const disconnectedPortalIds = statuses
+      .filter((status) => !status.connected)
+      .map((status) => status.id);
+    setExpandedPortalIds((current) => Array.from(new Set([...current, ...disconnectedPortalIds])));
+
+    setDemoPortals((current) => {
+      let changed = false;
+      const next = current.map((portal) => {
+        const connected = map.get(portal.id) ?? false;
+        if (portal.connected !== connected) {
+          changed = true;
+          return { ...portal, connected };
+        }
+        return portal;
+      });
+      return changed ? next : current;
+    });
   };
 
   const refreshChallenges = async () => {
@@ -395,7 +387,6 @@ export default function App() {
   useEffect(() => {
     setHealth("checking");
     void refreshHealth();
-    void refreshPreview();
     void refreshChallenges();
     const timer = window.setInterval(() => {
       void refreshChallenges();
@@ -403,6 +394,15 @@ export default function App() {
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [baseUrl]);
+
+  useEffect(() => {
+    if (demoPortals.length === 0) return;
+    void refreshPortalConnections();
+    const id = window.setInterval(() => {
+      void refreshPortalConnections();
+    }, 5000);
+    return () => window.clearInterval(id);
+  }, [baseUrl, demoPortals.length]);
 
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "#0B0B0B" }}>
@@ -422,7 +422,6 @@ export default function App() {
             startIcon={<RefreshRoundedIcon />}
             onClick={() => {
               void refreshHealth();
-              void refreshPreview();
               void refreshChallenges();
             }}
           >
@@ -457,141 +456,93 @@ export default function App() {
         </Paper>
 
         {tab === "codes" ? (
-          <Card sx={{ border: "1px solid #242424", bgcolor: "#111" }}>
-            <CardContent sx={{ display: "grid", gap: 2.5 }}>
-              <Typography variant="h6" sx={{ fontWeight: 800 }}>
-                Multi portal enrollment and phrase verifier
-              </Typography>
-              <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
-                <TextField
-                  label="Base32 secret"
-                  value={secretKey}
-                  onChange={(event) => setSecretKey(event.target.value.toUpperCase())}
-                  fullWidth
-                />
-                <TextField
-                  label="Portal account"
-                  value={portalDraft.accountName}
-                  onChange={(event) =>
-                    setPortalDraft((current) => ({
-                      ...current,
-                      accountName: event.target.value,
-                    }))
-                  }
-                  fullWidth
-                />
-                <TextField
-                  label="Portal issuer"
-                  value={portalDraft.issuerName}
-                  onChange={(event) =>
-                    setPortalDraft((current) => ({
-                      ...current,
-                      issuerName: event.target.value,
-                    }))
-                  }
-                  fullWidth
-                />
-              </Stack>
+          <>
+            <Card sx={{ border: "1px solid #242424", bgcolor: "#111" }}>
+              <CardContent sx={{ display: "grid", gap: 2.5 }}>
+                <Typography variant="h6" sx={{ fontWeight: 800 }}>
+                  Multi portal enrollment and code verifier
+                </Typography>
+                <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
+                  <TextField
+                    label="Portal account"
+                    value={portalDraft.accountName}
+                    onChange={(event) =>
+                      setPortalDraft((current) => ({
+                        ...current,
+                        accountName: event.target.value,
+                      }))
+                    }
+                    fullWidth
+                  />
+                  <TextField
+                    label="Portal issuer"
+                    value={portalDraft.issuerName}
+                    onChange={(event) =>
+                      setPortalDraft((current) => ({
+                        ...current,
+                        issuerName: event.target.value,
+                      }))
+                    }
+                    fullWidth
+                  />
+                </Stack>
 
-              <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
-                <TextField
-                  label="Portal secret"
-                  value={portalDraft.secretKey}
-                  onChange={(event) =>
-                    setPortalDraft((current) => ({
-                      ...current,
-                      secretKey: event.target.value.toUpperCase(),
-                    }))
-                  }
-                  helperText="Each portal can use a different secret for separate mobile accounts."
-                  fullWidth
-                />
-                <Button
-                  variant="outlined"
-                  sx={{
-                    alignSelf: { xs: "stretch", md: "flex-start" },
-                    minWidth: { md: 210 },
-                    height: 56,
-                    whiteSpace: "nowrap",
-                    px: 1.5,
-                  }}
-                  onClick={() => setPortalDraft(generateRandomPortalDraft())}
-                >
-                  Randomize demo fields
-                </Button>
-              </Stack>
+                <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
+                  <TextField
+                    label="Portal secret"
+                    value={portalDraft.secretKey}
+                    onChange={(event) =>
+                      setPortalDraft((current) => ({
+                        ...current,
+                        secretKey: event.target.value.toUpperCase(),
+                      }))
+                    }
+                    helperText="Each portal can use a different secret for separate mobile accounts."
+                    fullWidth
+                  />
+                  <Button
+                    variant="outlined"
+                    sx={{
+                      alignSelf: { xs: "stretch", md: "flex-start" },
+                      minWidth: { md: 210 },
+                      height: 56,
+                      whiteSpace: "nowrap",
+                      px: 1.5,
+                    }}
+                    onClick={() => setPortalDraft(generateRandomPortalDraft())}
+                  >
+                    Randomize demo fields
+                  </Button>
+                </Stack>
 
-              <Stack direction="row" spacing={1.5}>
-                <Button
-                  variant="contained"
-                  startIcon={<QrCodeRoundedIcon />}
-                  disabled={portalLoading}
-                  onClick={() => void createDemoPortal()}
-                >
-                  {portalLoading ? "Creating..." : "Create demo portal"}
-                </Button>
-              </Stack>
+                <Stack direction="row" spacing={1.5}>
+                  <Button
+                    variant="contained"
+                    startIcon={<QrCodeRoundedIcon />}
+                    disabled={portalLoading}
+                    onClick={() => void createDemoPortal()}
+                  >
+                    {portalLoading ? "Creating..." : "Create demo portal"}
+                  </Button>
+                </Stack>
 
-              {portalError ? <Alert severity="error">{portalError}</Alert> : null}
-              {previewError ? <Alert severity="error">{previewError}</Alert> : null}
+                {portalError ? <Alert severity="error">{portalError}</Alert> : null}
+              </CardContent>
+            </Card>
 
-              <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
-                <Paper sx={{ p: 2, flex: 1, border: "1px solid #242424", bgcolor: "#0E0E0E" }}>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                    Phrase entered from phone
-                  </Typography>
-                  <Box sx={{ display: "grid", gap: 1.2, gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
-                    {([0, 1, 2] as const).map((index) => (
-                      <TextField
-                        key={`phrase-field-${index}`}
-                        label={`Word ${index + 1}`}
-                        placeholder="WORD"
-                        value={phonePhraseParts[index]}
-                        disabled={demoPortals.length === 0}
-                        onChange={(event) => setPhrasePart(index, event.target.value)}
-                        onKeyDown={(event) => void onPhraseFieldKeyDown(event, index)}
-                        onPaste={onPhrasePaste}
-                        inputRef={(node) => {
-                          phraseFieldRefs.current[index] = node;
-                        }}
-                        fullWidth
-                      />
-                    ))}
-                  </Box>
-                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
-                    Use Tab to move between fields. Press Enter to check phrase.
-                  </Typography>
-                  {demoPortals.length === 0 ? (
-                    <Typography variant="caption" color="warning.main" sx={{ display: "block", mt: 0.75 }}>
-                      Create at least one demo portal before phrase verification.
-                    </Typography>
-                  ) : null}
-                  <Box sx={{ display: "flex", justifyContent: "flex-end", mt: 1 }}>
-                    <Button
-                      variant="outlined"
-                      startIcon={<RefreshRoundedIcon />}
-                      disabled={previewLoading || demoPortals.length === 0}
-                      onClick={() => void verifyPhonePhrase()}
-                    >
-                      {previewLoading ? "Checking" : "Check phrase from phone"}
-                    </Button>
-                  </Box>
-                  {verifyResult ? (
-                    <Alert severity={verifyResult.ok ? "success" : "warning"} sx={{ mt: 1.5 }}>
-                      {verifyResult.message}
-                    </Alert>
-                  ) : null}
-                </Paper>
-
-                <Paper sx={{ p: 2, flex: 1, border: "1px solid #242424", bgcolor: "#0E0E0E" }}>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                    Demo portal list
-                  </Typography>
-                  {demoPortals.length > 0 ? (
-                    <Stack spacing={1.5}>
-                      {demoPortals.map((portal) => (
+            <Card sx={{ border: "1px solid #242424", bgcolor: "#111" }}>
+              <CardContent>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                  Demo portal list
+                </Typography>
+                {demoPortals.length > 0 ? (
+                  <Stack spacing={1.5}>
+                    {demoPortals.map((portal) => {
+                      const parts = portalPhraseParts[portal.id] || ["", "", ""];
+                      const verifyResult = portalVerifyResults[portal.id];
+                      return (
                         <Paper key={portal.id} sx={{ p: 1.5, border: "1px solid #2C2C2C", bgcolor: "#111" }}>
-                          <Box sx={{ display: "grid", gap: 1 }}>
+                          <Box sx={{ display: "grid", gap: 1.2 }}>
                             <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 1 }}>
                               <Box sx={{ minWidth: 0 }}>
                                 <Typography variant="body2" sx={{ fontWeight: 700 }}>
@@ -602,14 +553,21 @@ export default function App() {
                                 </Typography>
                               </Box>
                               <Stack direction="row" spacing={0.8}>
+                                <Chip
+                                  size="small"
+                                  icon={portal.connected ? <CheckCircleOutlineRoundedIcon /> : <LinkOffRoundedIcon />}
+                                  label={portal.connected ? "Connected" : "Not connected"}
+                                  variant="outlined"
+                                  color={portal.connected ? "success" : "default"}
+                                />
                                 <Button
                                   size="small"
-                                  variant={portal.connected ? "contained" : "outlined"}
-                                  color={portal.connected ? "success" : "inherit"}
-                                  startIcon={portal.connected ? <CheckCircleOutlineRoundedIcon /> : <LinkOffRoundedIcon />}
-                                  onClick={() => togglePortalConnected(portal.id)}
+                                  variant="outlined"
+                                  color="error"
+                                  startIcon={<DeleteOutlineRoundedIcon />}
+                                  onClick={() => deleteDemoPortal(portal.id)}
                                 >
-                                  {portal.connected ? "Connected" : "Not connected"}
+                                  Delete
                                 </Button>
                                 <Button
                                   size="small"
@@ -628,17 +586,11 @@ export default function App() {
                               </Stack>
                             </Box>
 
-                            {portal.connected && !expandedPortalIds.includes(portal.id) ? (
-                              <Typography variant="caption" color="success.main">
-                                Connected. QR/URI is hidden. Expand details to view.
-                              </Typography>
-                            ) : null}
-
                             {expandedPortalIds.includes(portal.id) ? (
                               <>
                                 <Box sx={{ display: "flex", justifyContent: "center", py: 0.5 }}>
                                   <Box sx={{ backgroundColor: "#fff", p: 0.8, borderRadius: 1 }}>
-                                    <QRCodeSVG value={portal.setupUri} size={130} />
+                                    <QRCodeSVG value={portal.setupUri} size={240} />
                                   </Box>
                                 </Box>
                                 <TextField
@@ -658,58 +610,72 @@ export default function App() {
                               </>
                             ) : null}
 
-                            <Button
-                              variant="outlined"
-                              color="error"
-                              startIcon={<DeleteOutlineRoundedIcon />}
-                              onClick={() => deleteDemoPortal(portal.id)}
-                            >
-                              Delete portal
-                            </Button>
-                          </Box>
-                        </Paper>
-                      ))}
-
-                      <Paper sx={{ p: 1.5, border: "1px solid #2C2C2C", bgcolor: "#101010" }}>
-                        <Typography variant="body2" sx={{ fontWeight: 700, mb: 1 }}>
-                          Demo records ({demoPortals.length})
-                        </Typography>
-                        <Stack spacing={0.75}>
-                          {demoPortals.map((portal, index) => (
-                            <Box
-                              key={`record-${portal.id}`}
+                            <Typography
+                              variant="caption"
                               sx={{
-                                display: "grid",
-                                gridTemplateColumns: "46px 1fr auto",
-                                gap: 1,
-                                alignItems: "center",
-                                py: 0.5,
-                                borderTop: index === 0 ? "none" : "1px solid #242424",
+                                color: "text.secondary",
+                                opacity: 0.85,
+                                display: "block",
                               }}
                             >
-                              <Typography variant="caption" color="text.secondary">
-                                #{demoPortals.length - index}
-                              </Typography>
-                              <Typography variant="caption" color="text.secondary">
-                                {portal.issuer} / {portal.account}
-                              </Typography>
-                              <Typography variant="caption" color="text.secondary">
-                                {portal.connected ? "Connected" : "Not connected"}
-                              </Typography>
+                              Enter the 3 code words from this portal in mobile. Press Enter in any box to verify.
+                            </Typography>
+                            <Box sx={{ display: "grid", gap: 1.2, gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
+                              {([0, 1, 2] as const).map((index) => (
+                                <TextField
+                                  key={`${portal.id}-phrase-${index}`}
+                                  label={`Code word ${index + 1}`}
+                                  placeholder="WORD"
+                                  value={parts[index]}
+                                  disabled={!portal.connected}
+                                  onChange={(event) => setPortalPhrasePart(portal.id, index, event.target.value)}
+                                  onKeyDown={(event) => {
+                                    if (event.key === "Enter" && portal.connected) {
+                                      event.preventDefault();
+                                      void verifyPortalPhrase(portal);
+                                    }
+                                  }}
+                                  fullWidth
+                                />
+                              ))}
                             </Box>
-                          ))}
-                        </Stack>
-                      </Paper>
-                    </Stack>
-                  ) : (
-                    <Typography variant="body2" color="text.secondary">
-                      Create demo portals to generate multiple QR/URI entries for mobile import.
-                    </Typography>
-                  )}
-                </Paper>
-              </Stack>
-            </CardContent>
-          </Card>
+                            {verifyResult ? (
+                              <Typography
+                                variant="caption"
+                                sx={{
+                                  color: verifyResult.ok ? "success.main" : "warning.main",
+                                  fontWeight: 700,
+                                }}
+                              >
+                                {verifyResult.message}
+                              </Typography>
+                            ) : null}
+                            {verifyingPortalId === portal.id ? (
+                              <Box sx={{ display: "flex", gap: 1, alignItems: "center" }}>
+                                <CircularProgress size={14} />
+                                <Typography variant="caption" color="text.secondary">
+                                  Verifying code...
+                                </Typography>
+                              </Box>
+                            ) : null}
+                            {!portal.connected ? (
+                              <Typography variant="caption" color="warning.main">
+                                Not connected portal. Code verification is disabled.
+                              </Typography>
+                            ) : null}
+                          </Box>
+                        </Paper>
+                      );
+                    })}
+                  </Stack>
+                ) : (
+                  <Typography variant="body2" color="text.secondary">
+                    Create demo portals to generate multiple QR/URI entries for mobile import.
+                  </Typography>
+                )}
+              </CardContent>
+            </Card>
+          </>
         ) : null}
 
         {tab === "requests" ? (

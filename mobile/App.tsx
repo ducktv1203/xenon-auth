@@ -270,7 +270,8 @@ function AppShell() {
   const [accounts, setAccounts] = useState<AccountItem[]>([]);
   const [loadingCodes, setLoadingCodes] = useState(false);
   const syncCodesInFlightRef = useRef(false);
-  const pendingManualRefreshRef = useRef(false);
+  const pendingManualRefreshCountRef = useRef(0);
+  const manualRefreshSequenceRef = useRef(1);
   const [pasteUri, setPasteUri] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
@@ -294,6 +295,26 @@ function AppShell() {
     [challenges],
   );
 
+  const reportEnrollmentConnection = async (
+    payload: { issuer: string; account: string; secret: string },
+    connected: boolean,
+  ) => {
+    try {
+      await fetch(`${BACKEND_URL}/enrollment/connection`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          secret_key: payload.secret,
+          account_name: payload.account,
+          issuer: payload.issuer,
+          connected,
+        }),
+      });
+    } catch {
+      // Ignore non-blocking enrollment status sync failures.
+    }
+  };
+
   const upsertAccount = (parsed: { secret: string; account: string; issuer: string }) => {
     const accountId = `${parsed.issuer}:${parsed.account}`.toLowerCase();
     setAccounts((current) => {
@@ -313,6 +334,7 @@ function AppShell() {
       return [base, ...current];
     });
     setSetupError(null);
+    void reportEnrollmentConnection(parsed, true);
   };
 
   const applySetupUri = (candidate: string) => {
@@ -330,7 +352,7 @@ function AppShell() {
     if (accounts.length === 0) return;
     if (syncCodesInFlightRef.current) {
       if (options?.resetTimer) {
-        pendingManualRefreshRef.current = true;
+        pendingManualRefreshCountRef.current += 1;
       }
       return;
     }
@@ -365,7 +387,8 @@ function AppShell() {
               options?.resetTimer &&
               words.join("|") === account.words.join("|")
             ) {
-              const nextWindowTime = Math.floor(Date.now() / 1000) + STEP_SECONDS;
+              const nextWindowTime =
+                Math.floor(Date.now() / 1000) + STEP_SECONDS * manualRefreshSequenceRef.current;
               words = await fetchWordsForTime(account.secret, nextWindowTime);
             }
 
@@ -402,11 +425,12 @@ function AppShell() {
 
       if (options?.resetTimer) {
         resetWindow();
+        manualRefreshSequenceRef.current += 1;
       }
     } finally {
       syncCodesInFlightRef.current = false;
-      if (pendingManualRefreshRef.current) {
-        pendingManualRefreshRef.current = false;
+      if (pendingManualRefreshCountRef.current > 0) {
+        pendingManualRefreshCountRef.current -= 1;
         void syncAccountCodes({ resetTimer: true });
         return;
       }
@@ -625,6 +649,26 @@ function AppShell() {
         </View>
 
         {mode === "passive" ? (
+          <Pressable
+            onPress={() => void syncAccountCodes({ resetTimer: true })}
+            disabled={loadingCodes || accounts.length === 0}
+            style={({ pressed }) => ({
+              borderWidth: 1,
+              borderColor: COLORS.primary,
+              borderRadius: 999,
+              backgroundColor: COLORS.primarySoft,
+              paddingVertical: 11,
+              alignItems: "center",
+              ...pressFeedback(pressed, loadingCodes || accounts.length === 0),
+            })}
+          >
+            <Text style={{ color: COLORS.text, fontSize: 13, fontWeight: "800" }}>
+              {loadingCodes ? "Refreshing codes..." : "Refresh all codes"}
+            </Text>
+          </Pressable>
+        ) : null}
+
+        {mode === "passive" ? (
           <View style={{ gap: 12 }}>
             {accounts.length === 0 ? (
               <View
@@ -699,23 +743,6 @@ function AppShell() {
               ))
             )}
 
-            <Pressable
-              onPress={() => void syncAccountCodes({ resetTimer: true })}
-              disabled={loadingCodes || accounts.length === 0}
-              style={({ pressed }) => ({
-                borderWidth: 1,
-                borderColor: COLORS.primary,
-                borderRadius: 999,
-                backgroundColor: COLORS.primarySoft,
-                paddingVertical: 11,
-                alignItems: "center",
-                ...pressFeedback(pressed, loadingCodes || accounts.length === 0),
-              })}
-            >
-              <Text style={{ color: COLORS.text, fontSize: 13, fontWeight: "800" }}>
-                {loadingCodes ? "Refreshing codes..." : "Refresh all codes"}
-              </Text>
-            </Pressable>
           </View>
         ) : (
           <View style={{ gap: 12 }}>
@@ -901,7 +928,17 @@ function AppShell() {
                       <Text style={{ color: COLORS.muted, fontSize: 11 }}>{account.account}</Text>
                     </View>
                     <Pressable
-                      onPress={() => setAccounts((current) => current.filter((item) => item.id !== account.id))}
+                      onPress={() => {
+                        void reportEnrollmentConnection(
+                          {
+                            issuer: account.issuer,
+                            account: account.account,
+                            secret: account.secret,
+                          },
+                          false,
+                        );
+                        setAccounts((current) => current.filter((item) => item.id !== account.id));
+                      }}
                       style={({ pressed }) => ({
                         borderRadius: 999,
                         borderWidth: 1,
