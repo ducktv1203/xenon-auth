@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import hashlib
+import os
 import random
 from threading import Lock
 from typing import Literal
@@ -21,9 +23,17 @@ from app.core.totp_words import (
 
 app = FastAPI(title="Xenon Auth Backend", version="0.1.0")
 
+
+def _load_allowed_origins() -> list[str]:
+    configured = os.getenv("CORS_ALLOW_ORIGINS", "")
+    origins = [entry.strip() for entry in configured.split(",") if entry.strip()]
+    if origins:
+        return origins
+    return ["http://localhost:5173", "http://localhost:8081"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_load_allowed_origins(),
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -92,6 +102,19 @@ class ActiveChallengeRecord(BaseModel):
     responded_at: int | None = None
 
 
+class ActiveChallengePublicRecord(BaseModel):
+    id: str
+    user: str
+    application: str
+    location: str
+    device_label: str
+    message: str
+    status: ChallengeStatus
+    created_at: int
+    expires_at: int
+    responded_at: int | None = None
+
+
 def _now_unix() -> int:
     return int(datetime.now(timezone.utc).timestamp())
 
@@ -152,14 +175,38 @@ def _build_otpauth_uri(secret_key: str, account_name: str, issuer: str) -> str:
     )
 
 
+def _normalize_secret(secret_key: str) -> str:
+    return secret_key.strip().replace(" ", "").upper()
+
+
+def _secret_fingerprint(secret_key: str) -> str:
+    normalized = _normalize_secret(secret_key)
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:24]
+
+
 def _enrollment_key(secret_key: str, account_name: str, issuer: str) -> str:
     return "|".join(
         [
-            secret_key.strip().replace(" ", "").upper(),
+            _secret_fingerprint(secret_key),
             account_name.strip().lower(),
             issuer.strip().lower(),
         ]
     )
+
+
+def _to_public_challenge(record: dict[str, object]) -> dict[str, object]:
+    return ActiveChallengePublicRecord(
+        id=str(record["id"]),
+        user=str(record["user"]),
+        application=str(record["application"]),
+        location=str(record["location"]),
+        device_label=str(record["device_label"]),
+        message=str(record["message"]),
+        status=str(record["status"]),
+        created_at=int(record["created_at"]),
+        expires_at=int(record["expires_at"]),
+        responded_at=int(record["responded_at"]) if record["responded_at"] is not None else None,
+    ).model_dump()
 
 
 def _set_challenge_status(challenge_id: str, status: ChallengeStatus) -> dict[str, object]:
@@ -242,7 +289,7 @@ def list_active_challenges(state: str = "pending") -> dict[str, object]:
             _expire_if_needed(record)
 
         challenges = [
-            ActiveChallengeRecord(**record).model_dump()
+            _to_public_challenge(record)
             for record in sorted(
                 _active_challenges.values(),
                 key=lambda item: int(item["created_at"]),
@@ -254,24 +301,24 @@ def list_active_challenges(state: str = "pending") -> dict[str, object]:
     return {"challenges": challenges}
 
 
-@app.post("/active/challenges", response_model=ActiveChallengeRecord)
+@app.post("/active/challenges", response_model=ActiveChallengePublicRecord)
 def create_active_challenge(payload: ActiveChallengeCreateRequest) -> dict[str, object]:
     record = _create_challenge(payload)
     with _challenge_lock:
         _active_challenges[record["id"]] = record
-    return record
+    return _to_public_challenge(record)
 
 
-@app.post("/active/challenges/{challenge_id}/approve", response_model=ActiveChallengeRecord)
+@app.post("/active/challenges/{challenge_id}/approve", response_model=ActiveChallengePublicRecord)
 def approve_active_challenge(challenge_id: str, payload: ActiveChallengeApproveRequest) -> dict[str, object]:
     record = _get_challenge_or_404(challenge_id)
     if record["status"] != "pending":
         raise HTTPException(status_code=409, detail=f'Challenge is already {record["status"]}')
     if str(record["verification_code"]) != payload.verification_code.strip():
-        return _set_challenge_status(challenge_id, "denied")
-    return _set_challenge_status(challenge_id, "approved")
+        return _to_public_challenge(_set_challenge_status(challenge_id, "denied"))
+    return _to_public_challenge(_set_challenge_status(challenge_id, "approved"))
 
 
-@app.post("/active/challenges/{challenge_id}/deny", response_model=ActiveChallengeRecord)
+@app.post("/active/challenges/{challenge_id}/deny", response_model=ActiveChallengePublicRecord)
 def deny_active_challenge(challenge_id: str) -> dict[str, object]:
-    return _set_challenge_status(challenge_id, "denied")
+    return _to_public_challenge(_set_challenge_status(challenge_id, "denied"))

@@ -41,7 +41,6 @@ type ActiveChallenge = {
   location: string;
   device_label: string;
   message: string;
-  verification_code: string;
   status: ChallengeStatus;
   created_at: number;
   expires_at: number;

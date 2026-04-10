@@ -41,7 +41,6 @@ type ActiveChallenge = {
   location: string;
   device_label: string;
   message: string;
-  verification_code: string;
   status: ChallengeStatus;
   created_at: number;
   expires_at: number;
@@ -762,10 +761,6 @@ export default function App() {
                         <Typography variant="body2" color="text.secondary">
                           {challenge.user} · {challenge.location} · {challenge.device_label}
                         </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          Sign-in displayed code: <strong>{challenge.verification_code}</strong>
-                        </Typography>
-
                         {challenge.status === "pending" ? (
                           <Stack direction={{ xs: "column", md: "row" }} spacing={1}>
                             <Box sx={{ display: "flex", gap: 1, alignItems: "center", px: 0.5 }}>

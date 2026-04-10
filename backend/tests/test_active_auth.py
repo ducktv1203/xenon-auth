@@ -32,7 +32,7 @@ def test_create_and_list_pending_challenge() -> None:
     challenge = response.json()
     assert challenge["status"] == "pending"
     assert challenge["user"] == "alice@example.com"
-    assert challenge["verification_code"] == "321"
+    assert "verification_code" not in challenge
 
     list_response = client.get("/active/challenges")
     assert list_response.status_code == 200
@@ -97,6 +97,7 @@ def test_create_challenge_with_custom_ttl() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["expires_at"] - payload["created_at"] == 300
+    assert "verification_code" not in payload
 
 
 def test_enrollment_connection_status_lifecycle() -> None:
