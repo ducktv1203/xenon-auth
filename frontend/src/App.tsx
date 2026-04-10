@@ -56,6 +56,31 @@ type DemoPortal = {
   connected: boolean;
 };
 
+const DEMO_FLOW_STEPS = [
+  {
+    title: "1) Create a demo portal",
+    detail:
+      "Use Code and Enrollment Lab to generate a portal account, issuer, and setup URI. Import that URI in the mobile app.",
+  },
+  {
+    title: "2) Validate rotating code words",
+    detail:
+      "After mobile import, enter the 3 code words shown on mobile into this page and verify they match backend preview output.",
+  },
+  {
+    title: "3) Simulate push approval",
+    detail:
+      "Switch to Active Request Lab, create a sign-in request, then approve or deny from the mobile app request screen.",
+  },
+];
+
+const DEMO_NOTES = [
+  "This portal is a learning sandbox, not production auth.",
+  "Keep backend URL pointed to your local or trusted demo backend.",
+  "Challenge responses no longer expose verification codes in API payloads.",
+  "Use short request TTLs while testing request timeout behavior.",
+];
+
 const BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 const ENGLISH_ADJECTIVES = demoLexicon.adjectives;
 const ENGLISH_NOUNS = demoLexicon.nouns;
@@ -411,6 +436,44 @@ export default function App() {
               onChange={(event) => setBackendUrl(event.target.value)}
               fullWidth
             />
+          </Stack>
+        </Paper>
+
+        <Paper sx={{ p: 2, border: "1px solid #242424", bgcolor: "#0F0F0F" }}>
+          <Stack spacing={1.8}>
+            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
+              <Typography variant="h6" sx={{ fontWeight: 800 }}>
+                How This Demo Works
+              </Typography>
+              <Chip size="small" label="Quick Guide" variant="outlined" color="info" />
+            </Box>
+
+            <Box
+              sx={{
+                display: "grid",
+                gap: 1.2,
+                gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" },
+              }}
+            >
+              {DEMO_FLOW_STEPS.map((step) => (
+                <Paper key={step.title} sx={{ p: 1.3, border: "1px solid #252525", bgcolor: "#121212" }}>
+                  <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.5 }}>
+                    {step.title}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.5 }}>
+                    {step.detail}
+                  </Typography>
+                </Paper>
+              ))}
+            </Box>
+
+            <Box sx={{ display: "grid", gap: 0.6 }}>
+              {DEMO_NOTES.map((note) => (
+                <Typography key={note} variant="caption" color="text.secondary">
+                  {`- ${note}`}
+                </Typography>
+              ))}
+            </Box>
           </Stack>
         </Paper>
 
