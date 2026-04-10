@@ -15,8 +15,9 @@ import {
 } from "react-native";
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { BACKEND_URL } from "./src/config";
+
 const STEP_SECONDS = 60;
-const BACKEND_URL = "http://localhost:8000";
 const STORAGE_KEY = "xenon_auth_accounts_v1";
 const REQUESTS_NOTIFICATION_CHANNEL = "xenon-auth-requests";
 

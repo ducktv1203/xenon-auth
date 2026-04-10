@@ -32,3 +32,9 @@ Xenon Auth is a Baryonic Authentication system that turns TOTP outputs into a 3-
 	npm install
 3. Run:
 	npm start
+
+## Environment
+
+- frontend/.env.example uses VITE_BACKEND_URL
+- mobile/.env.example uses EXPO_PUBLIC_BACKEND_URL
+- Copy the example file in each app folder to a local .env before running

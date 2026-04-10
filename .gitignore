@@ -147,8 +147,10 @@ backend/.env
 backend/.env.*
 frontend/.env
 frontend/.env.*
+frontend/.env.local
 mobile/.env
 mobile/.env.*
+mobile/.env.local
 
 # Spyder project settings
 .spyderproject

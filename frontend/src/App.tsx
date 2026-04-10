@@ -29,8 +29,7 @@ import CheckCircleOutlineRoundedIcon from "@mui/icons-material/CheckCircleOutlin
 import LinkOffRoundedIcon from "@mui/icons-material/LinkOffRounded";
 import { QRCodeSVG } from "qrcode.react";
 import { BrandLogo } from "./BrandLogo";
-
-const DEFAULT_BACKEND_URL = "http://localhost:8000";
+import { DEFAULT_BACKEND_URL } from "./config";
 type PortalTab = "codes" | "requests";
 type ChallengeStatus = "pending" | "approved" | "denied" | "expired";
 
