@@ -1,0 +1,38 @@
+{
+  "adjectives": [
+    "bright",
+    "swift",
+    "noble",
+    "solid",
+    "crystal",
+    "bold",
+    "prime",
+    "lucky",
+    "secure",
+    "vivid"
+  ],
+  "nouns": [
+    "falcon",
+    "river",
+    "forest",
+    "bridge",
+    "harbor",
+    "lighthouse",
+    "summit",
+    "station",
+    "circle",
+    "signal"
+  ],
+  "teams": [
+    "Northstar",
+    "Blue Harbor",
+    "Summit Gate",
+    "Riverfield",
+    "Silver Grove",
+    "Atlas Point",
+    "Beacon Works",
+    "Clearpath",
+    "Oakline",
+    "Stonebridge"
+  ]
+}

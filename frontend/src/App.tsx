@@ -30,6 +30,7 @@ import LinkOffRoundedIcon from "@mui/icons-material/LinkOffRounded";
 import { QRCodeSVG } from "qrcode.react";
 import { BrandLogo } from "./BrandLogo";
 import { DEFAULT_BACKEND_URL } from "./config";
+import demoLexicon from "./demo-lexicon.json";
 type PortalTab = "codes" | "requests";
 type ChallengeStatus = "pending" | "approved" | "denied" | "expired";
 
@@ -57,42 +58,9 @@ type DemoPortal = {
 };
 
 const BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-const ENGLISH_ADJECTIVES = [
-  "bright",
-  "swift",
-  "noble",
-  "solid",
-  "crystal",
-  "bold",
-  "prime",
-  "lucky",
-  "secure",
-  "vivid",
-];
-const ENGLISH_NOUNS = [
-  "falcon",
-  "river",
-  "forest",
-  "bridge",
-  "harbor",
-  "lighthouse",
-  "summit",
-  "station",
-  "circle",
-  "signal",
-];
-const ENGLISH_TEAMS = [
-  "Northstar",
-  "Blue Harbor",
-  "Summit Gate",
-  "Riverfield",
-  "Silver Grove",
-  "Atlas Point",
-  "Beacon Works",
-  "Clearpath",
-  "Oakline",
-  "Stonebridge",
-];
+const ENGLISH_ADJECTIVES = demoLexicon.adjectives;
+const ENGLISH_NOUNS = demoLexicon.nouns;
+const ENGLISH_TEAMS = demoLexicon.teams;
 
 function pickRandom<T>(items: T[]): T {
   return items[Math.floor(Math.random() * items.length)];
