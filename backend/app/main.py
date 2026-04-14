@@ -25,16 +25,15 @@ app = FastAPI(title="Xenon Auth Backend", version="0.1.0")
 
 
 def _load_allowed_origins() -> list[str]:
-    configured = os.getenv("CORS_ALLOW_ORIGINS", "")
-    origins = [entry.strip() for entry in configured.split(",") if entry.strip()]
-    if origins:
-        return origins
-    return ["http://localhost:5173", "http://localhost:8081"]
+    # In production, use os.getenv("CORS_ALLOW_ORIGINS")
+    # For development/demo purposes, we allow all origins to facilitate 
+    # testing across multiple local devices (phone, laptop, etc.) without IP mismatches.
+    return ["*"]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_load_allowed_origins(),
-    allow_credentials=False,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
