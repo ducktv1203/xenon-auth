@@ -329,9 +329,12 @@ function AppShell() {
     connected: boolean,
   ) => {
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
       await fetch(`${BACKEND_URL}/enrollment/connection`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({
           secret_key: payload.secret,
           account_name: payload.account,
@@ -339,6 +342,7 @@ function AppShell() {
           connected,
         }),
       });
+      clearTimeout(timeoutId);
     } catch {
       // Ignore non-blocking enrollment status sync failures.
     }
@@ -390,14 +394,18 @@ function AppShell() {
     setLoadingCodes(true);
     try {
       const fetchCodesForTime = async (secret: string, unixTime?: number): Promise<string[]> => {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 8000);
         const response = await fetch(`${BACKEND_URL}/preview/words`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
           body: JSON.stringify({
             secret_key: secret,
             ...(unixTime ? { unix_time: unixTime } : {}),
           }),
         });
+        clearTimeout(timeoutId);
         if (!response.ok) throw new Error(`Backend ${response.status}`);
 
         const payload = (await response.json()) as { words?: unknown };
@@ -472,7 +480,12 @@ function AppShell() {
     setLoadingChallenges(true);
     try {
       setChallengeError(null);
-      const response = await fetch(`${BACKEND_URL}/active/challenges?state=all`);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
+      const response = await fetch(`${BACKEND_URL}/active/challenges?state=all`, {
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
       if (!response.ok) throw new Error(`Backend ${response.status}`);
 
       const payload = (await response.json()) as { challenges?: unknown };
